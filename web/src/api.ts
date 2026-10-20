@@ -188,6 +188,19 @@ export interface Route {
   updatedAt: string;
 }
 
+export interface RoutePhoto {
+  id: string;
+  routeId: string;
+  kind: 'taken_here';
+  url: string;
+  thumbUrl: string;
+  w: number;
+  h: number;
+  takenAt: string | null;
+  caption: string;
+  createdAt: string;
+}
+
 // --- phase 3: feeds ---
 
 export interface Plane { hex: string; flight: string; lat: number; lon: number; track: number | null; gs: number | null; alt_baro: number | null; t: string; seen: number }
@@ -720,4 +733,14 @@ export const api = {
   updateRoute: (id: string, route: Partial<Route>) =>
     fetch(`/api/routes/${id}`, { method: 'PATCH', headers: jsonHeaders, body: JSON.stringify(route) }).then((r) => json<Route>(r)),
   deleteRoute: (id: string) => fetch(`/api/routes/${id}`, { method: 'DELETE' }).then((r) => json<{ ok: boolean }>(r)),
+  routePhotos: (routeId: string) => fetch(`/api/routes/${routeId}/photos`).then((r) => json<RoutePhoto[]>(r)),
+  uploadRoutePhoto: (routeId: string, photo: Blob, thumb: Blob, size: { w: number; h: number }) => {
+    const form = new FormData();
+    form.append('photo', photo);
+    form.append('thumb', thumb);
+    form.append('w', String(size.w));
+    form.append('h', String(size.h));
+    return fetch(`/api/routes/${routeId}/photos`, { method: 'POST', body: form }).then((r) => json<RoutePhoto>(r));
+  },
+  deleteRoutePhoto: (id: string) => fetch(`/api/route-photos/${id}`, { method: 'DELETE' }).then((r) => json<{ ok: boolean }>(r)),
 };

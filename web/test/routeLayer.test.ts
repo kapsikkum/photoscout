@@ -6,6 +6,7 @@ import {
   routeFeatureCollections,
   routePulseGradient,
 } from '../src/map/routeLayer.js';
+import { categoryOf } from '../src/map/legend.js';
 
 const route = (patch: Partial<Route>): Route => ({
   id: 'r1',
@@ -55,6 +56,12 @@ test('routeFeatureCollections keeps a long route as one LineString instead of on
 
   assert.equal(segments.features.length, 1);
   assert.deepEqual(segments.features[0].geometry, { type: 'LineString', coordinates: vertices });
+});
+
+test('every layer in ROUTE_LAYERS matches legend category routes', () => {
+  for (const id of ROUTE_LAYERS) {
+    assert.equal(categoryOf({ id, type: 'line' }), 'routes', 'Layer ' + id + ' must match legend category routes');
+  }
 });
 
 test('ROUTE_LAYERS includes every rendered route overlay layer', () => {

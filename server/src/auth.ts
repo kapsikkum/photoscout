@@ -51,7 +51,9 @@ const OPEN_ROUTES = [
 const ANONYMOUS_READS = [
   /^\/api\/(places|spots|routes)(\/[^/]+)?$/,
   /^\/api\/spots\/[^/]+\/photos$/,
+  /^\/api\/routes\/[^/]+\/photos$/,
   /^\/api\/photos\/[^/]+\/(file|thumb)$/,
+  /^\/api\/route-photos\/[^/]+\/(file|thumb)$/,
   // Where the map opens. A visitor gets the same cut-down answer a member does.
   /^\/api\/settings$/,
   // Map layers with no parameters, answered from this server's own cache:

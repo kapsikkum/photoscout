@@ -41,6 +41,7 @@ import SpotPanel from '../components/SpotPanel.js';
 import SpotEditor, { SpotDraft } from '../components/SpotEditor.js';
 import PlaceEditor, { draftToPlace, PlaceDraft, placeToDraft } from '../components/PlaceEditor.js';
 import RouteEditor, { blankRouteDraft, draftToRoute, RouteDraft, routeToDraft } from '../components/RouteEditor.js';
+import RoutePhotos from '../components/RoutePhotos.js';
 import { fetchOsrmFullRoute, routeDistanceKm, routeStops, routingWaypoints } from '../map/routeGeometry.js';
 import { updateRoutes, ROUTE_LINE_LAYER } from '../map/routeLayer.js';
 import { RouteWaypointMarkers, RouteStagingMarker } from '../map/routeWaypointMarkers.js';
@@ -548,13 +549,16 @@ export default function MapPage({ user }: { user: User | null }) {
     if (!map) return;
     const spotId = params.get('spot');
     const placeId = params.get('place');
+    const routeId = params.get('route');
     const s = spotId && spots.find((x) => x.id === spotId);
     const p = placeId && places.find((x) => x.id === placeId);
+    const r = routeId && routes.find((x) => x.id === routeId);
     if (s) { setSelected({ type: 'spot', id: s.id }); focus(s.lng, s.lat, 15); }
     else if (p) { setSelected({ type: 'place', id: p.id }); fitPlace(p); }
+    else if (r) { setSelected({ type: 'route', id: r.id }); focus(r.vertices[0][0], r.vertices[0][1], 12); }
     else return;
     setParams({}, { replace: true });
-  }, [map, spots, places]);
+  }, [map, spots, places, routes]);
 
   // A feed item's `?lat=&lng=` link: look at that spot on the map.
   useEffect(() => {
@@ -1488,10 +1492,12 @@ export default function MapPage({ user }: { user: User | null }) {
               <h2>{selectedRoute.name}</h2>
               <p className="hint">{selectedRoute.type === 'circuit' ? 'Circuit' : 'Sprint'} · {selectedRoute.waypoints ? `${selectedRoute.waypoints.length} stops` : 'Saved path'} · {routeDistanceKm(selectedRoute.vertices, selectedRoute.type).toFixed(1)} km · {selectedRoute.visibility}</p>
               {selectedRoute.notes && <p className="panel__notes">{selectedRoute.notes}</p>}
+              <RoutePhotos route={selectedRoute} canEdit={canEdit(selectedRoute.ownerId)} />
               <div className="panel__actions">
                 <Link to={`/plan?route=${selectedRoute.id}`}><button>Plan shoot</button></Link>
                 {user && <Link to={`/drive?route=${selectedRoute.id}`}><button>Drive it</button></Link>}
                 {user && <Link to={`/convoy?route=${selectedRoute.id}`}><button>Share with convoy</button></Link>}
+                {(selectedRoute.visibility === 'public' || selectedRoute.visibility === 'unlisted') && <button onClick={() => void navigator.clipboard?.writeText(`${window.location.origin}/?route=${encodeURIComponent(selectedRoute.id)}`)}>Copy public link</button>}
                 {canEdit(selectedRoute.ownerId) && <><button className="primary" onClick={() => openRouteEdit(routeToDraft(selectedRoute))}>Edit</button><button className="danger" onClick={() => void deleteRoute(selectedRoute)}>Delete</button></>}
               </div>
             </>

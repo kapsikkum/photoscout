@@ -295,6 +295,20 @@ CREATE TABLE IF NOT EXISTS photos (
 );
 CREATE INDEX IF NOT EXISTS idx_photos_spot ON photos(spot_id);
 
+CREATE TABLE IF NOT EXISTS route_photos (
+  id TEXT PRIMARY KEY,
+  route_id TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  file TEXT NOT NULL,
+  thumb TEXT NOT NULL,
+  w INTEGER NOT NULL DEFAULT 0,
+  h INTEGER NOT NULL DEFAULT 0,
+  taken_at TEXT,
+  caption TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_route_photos_route ON route_photos(route_id);
+
 CREATE TABLE IF NOT EXISTS candidates (
   id TEXT PRIMARY KEY,
   source TEXT NOT NULL,

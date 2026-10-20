@@ -18,6 +18,7 @@ const layers = [
   { id: 'poi_r1', type: 'symbol', 'source-layer': 'poi' },
   { id: 'rail-lines', type: 'line', source: 'rail' },
   { id: 'route-lines', type: 'line', source: 'routes', paint: { 'line-color': '#f97316' } },
+  { id: 'route-pulse', type: 'line', source: 'routes' },
   { id: 'route-staging', type: 'symbol', source: 'route-staging-pts' },
   { id: 'rays', type: 'line', source: 'rays' },
   { id: 'night-lights', type: 'raster' },
@@ -31,10 +32,10 @@ test('classifies base style and overlay layers', () => {
     road_motorway: 'roads', road_major_rail: 'rail-base', tunnel_transit_rail: 'rail-base', road_path_pedestrian: 'roads',
     water: 'water', waterway_river: 'water', waterway_line_label: 'labels', 'building-3d': 'buildings', boundary_2: 'boundaries',
     park: 'water', label_town: 'labels', poi_r1: 'labels', 'rail-lines': 'rail', rays: 'sun', 'night-lights': 'night-lights', 'fires-pts': 'fires',
-    'route-lines': 'routes', 'route-staging': 'routes', background: null,
+    'route-lines': 'routes', 'route-pulse': 'routes', 'route-staging': 'routes', background: null,
   });
   assert.deepEqual(groupLayers(layers).water, ['water', 'waterway_river', 'park']);
-  assert.deepEqual(groupLayers(layers).routes, ['route-lines', 'route-staging']);
+  assert.deepEqual(groupLayers(layers).routes, ['route-lines', 'route-pulse', 'route-staging']);
 });
 
 test('swatch reads literal paint colours, else falls back', () => {

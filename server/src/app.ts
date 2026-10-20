@@ -658,6 +658,11 @@ function photosToday(userId: string): number {
   return r.n;
 }
 
+function routePhotosToday(userId: string): number {
+  const since = new Date(Date.now() - 86_400_000).toISOString();
+  return (db.handle.prepare('SELECT COUNT(*) AS n FROM route_photos WHERE owner_id = ? AND created_at > ?').get(userId, since) as { n: number }).n;
+}
+
 app.post('/api/spots/:id/photos', uploadLimit, async (req, res, next) => {
   try {
     const spot = db.handle.prepare('SELECT * FROM spots WHERE id = ?').get(req.params.id) as unknown as SpotRow | undefined;
@@ -1363,7 +1368,71 @@ app.delete('/api/routes/:id', (req, res) => {
   const row = db.handle.prepare('SELECT * FROM routes WHERE id = ?').get(req.params.id) as unknown as RouteRow | undefined;
   if (!row) return res.status(404).json({ error: 'Not found' });
   if (!canEdit(row.owner_id, req.user)) return res.status(403).json({ error: 'Forbidden' });
+  const photos = db.handle.prepare('SELECT file, thumb FROM route_photos WHERE route_id = ?').all(row.id) as { file: string; thumb: string }[];
+  deleteImages(photos.flatMap((photo) => [photo.file, photo.thumb]));
+  db.handle.prepare('DELETE FROM route_photos WHERE route_id = ?').run(row.id);
   db.handle.prepare('DELETE FROM routes WHERE id = ?').run(row.id);
+  res.json({ ok: true });
+});
+
+interface RoutePhotoRow {
+  id: string; route_id: string; owner_id: string; file: string; thumb: string;
+  w: number; h: number; taken_at: string | null; caption: string; created_at: string;
+}
+function routePhotoJson(row: RoutePhotoRow) {
+  return {
+    id: row.id, routeId: row.route_id,
+    kind: 'taken_here' as const,
+    url: `/api/route-photos/${row.id}/file`, thumbUrl: `/api/route-photos/${row.id}/thumb`,
+    w: row.w, h: row.h, takenAt: row.taken_at, caption: row.caption, createdAt: row.created_at,
+  };
+}
+
+app.post('/api/routes/:id/photos', uploadLimit, async (req, res, next) => {
+  try {
+    const route = db.handle.prepare('SELECT * FROM routes WHERE id = ?').get(req.params.id) as unknown as RouteRow | undefined;
+    if (!route) return res.status(404).json({ error: 'Not found' });
+    if (!canEdit(route.owner_id, req.user)) return res.status(403).json({ error: 'Forbidden' });
+    if (photosToday(route.owner_id) + routePhotosToday(route.owner_id) >= MAX_PHOTOS_PER_DAY) return res.status(429).json({ error: 'Daily photo limit reached. Try again tomorrow.' });
+    const { fields, files } = await parseMultipart(req, MAX_PHOTO_BYTES * 2 + 4096);
+    if (!files.photo || !detectImageType(files.photo)) return res.status(400).json({ error: 'photo must be a JPEG, PNG or WebP file' });
+    const thumbBuf = files.thumb && detectImageType(files.thumb) ? files.thumb : files.photo;
+    const { w, h, takenAt } = photoMeta(fields);
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const file = saveImage(files.photo);
+    const thumb = saveImage(thumbBuf);
+    db.handle.prepare('INSERT INTO route_photos (id, route_id, owner_id, file, thumb, w, h, taken_at, caption, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, route.id, route.owner_id, file, thumb, w, h, takenAt, String(fields.caption ?? '').slice(0, 2000), now);
+    res.status(201).json(routePhotoJson(db.handle.prepare('SELECT * FROM route_photos WHERE id = ?').get(id) as unknown as RoutePhotoRow));
+  } catch (err) { next(err); }
+});
+
+app.get('/api/routes/:id/photos', (req, res) => {
+  const route = db.handle.prepare('SELECT * FROM routes WHERE id = ?').get(req.params.id) as unknown as RouteRow | undefined;
+  if (!route || !canRead(route.visibility, route.owner_id, req.user)) return res.status(404).json({ error: 'Not found' });
+  const rows = db.handle.prepare('SELECT * FROM route_photos WHERE route_id = ? ORDER BY created_at').all(route.id) as unknown as RoutePhotoRow[];
+  res.json(rows.map(routePhotoJson));
+});
+
+function serveRoutePhoto(variant: 'file' | 'thumb') {
+  return (req: express.Request, res: express.Response) => {
+    const row = db.handle.prepare('SELECT p.*, r.visibility AS route_visibility, r.owner_id AS route_owner_id FROM route_photos p JOIN routes r ON r.id = p.route_id WHERE p.id = ?')
+      .get(req.params.id) as (RoutePhotoRow & { route_visibility: Visibility; route_owner_id: string }) | undefined;
+    if (!row || !canRead(row.route_visibility, row.route_owner_id, req.user)) return res.status(404).json({ error: 'Not found' });
+    res.sendFile(path.join(photosDir, variant === 'file' ? row.file : row.thumb));
+  };
+}
+app.get('/api/route-photos/:id/file', serveRoutePhoto('file'));
+app.get('/api/route-photos/:id/thumb', serveRoutePhoto('thumb'));
+
+app.delete('/api/route-photos/:id', (req, res) => {
+  const row = db.handle.prepare('SELECT p.*, r.owner_id AS route_owner_id FROM route_photos p JOIN routes r ON r.id = p.route_id WHERE p.id = ?')
+    .get(req.params.id) as (RoutePhotoRow & { route_owner_id: string }) | undefined;
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  if (!canEdit(row.route_owner_id, req.user)) return res.status(403).json({ error: 'Forbidden' });
+  deleteImages([row.file, row.thumb]);
+  db.handle.prepare('DELETE FROM route_photos WHERE id = ?').run(row.id);
   res.json({ ok: true });
 });
 
