@@ -62,10 +62,10 @@ export function withMine(room: Room, me: string | null, mine: Position | null): 
 }
 
 /** The pieces of a room the map draws, in the one shape any map can be handed. */
-export interface ConvoyView { members: Member[]; leader: string; me: string | null; destination: Destination | null; route: import('./types.js').ConvoyRoute | null }
+export interface ConvoyView { members: Member[]; leader: string; me: string | null; destination: Destination | null; cruising: boolean; route: import('./types.js').ConvoyRoute | null }
 
 export const viewOf = (room: Room, me: string | null, mine: Position | null): ConvoyView =>
-  ({ members: withMine(room, me, mine), leader: room.leader, me, destination: room.destination, route: room.route });
+  ({ members: withMine(room, me, mine), leader: room.leader, me, destination: room.destination, cruising: room.cruising, route: room.route });
 
 /** "just now", "3 min ago", "2 h ago" for a last-seen time given in ms. */
 export function lastSeenText(ms: number, now = Date.now()): string {

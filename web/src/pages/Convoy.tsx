@@ -200,6 +200,7 @@ function InRoom({ convoy }: { convoy: ConvoyApi }) {
       <ConvoyMap view={view} onPick={picking ? (lat, lng) => { convoy.setDestination({ lat, lng, label: label.trim() }); setPicking(false); setLabel(''); } : undefined} />
 
       <div className="convoy__dest">
+        {room.cruising && <p className="hint">Just cruising — the leader has cleared the shared destination and route.</p>}
         {room.destination
           ? <p>⚑ <strong>{room.destination.label || 'Destination'}</strong> <span className="hint">{room.destination.lat.toFixed(4)}, {room.destination.lng.toFixed(4)}</span></p>
           : <p className="hint">No destination yet.{iLead ? ' Choose one on the map.' : ' The leader can set one.'}</p>}
@@ -211,6 +212,7 @@ function InRoom({ convoy }: { convoy: ConvoyApi }) {
         )}
         {iLead && (
           <div className="eventcard__actions">
+            <button onClick={() => convoy.setCruising(!room.cruising)}>{room.cruising ? 'Resume guided convoy' : 'Just cruise'}</button>
             {picking
               ? <>
                   <input value={label} maxLength={80} placeholder="Name it (optional), then tap the map" onChange={(e) => setLabel(e.target.value)} />

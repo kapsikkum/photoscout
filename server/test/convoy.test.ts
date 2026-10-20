@@ -72,6 +72,29 @@ test('any convoy member can pause at a rest stop, while the leader resumes the s
   assert.equal((rooms.view(made.value.code)! as { resting?: boolean }).resting, false);
 });
 
+test('a leader can switch a convoy to just-cruise mode, while rest stops still resume to no destination', () => {
+  const rooms = new Rooms();
+  const route = { name: 'Mountain loop', stops: [[149.5, -33.4], [149.6, -33.5]] as [number, number][] };
+  const made = rooms.create(who(1), { route, destination: { lat: -33.5, lng: 149.6, label: 'Lookout' } });
+  assert.ok(made.ok);
+  if (!made.ok) return;
+  assert.ok(rooms.join(made.value.code, who(2)).ok);
+  assert.equal(rooms.setCruising(made.value.code, 'u2', true).ok, false);
+  const cruising = rooms.setCruising(made.value.code, 'u1', true);
+  assert.ok(cruising.ok);
+  if (!cruising.ok) return;
+  assert.equal(cruising.value.cruising, true);
+  assert.equal(cruising.value.destination, null);
+  assert.equal(cruising.value.route, null);
+  assert.ok(rooms.setRestStop(made.value.code, 'u2', { lat: -33.42, lng: 149.52, label: 'Nearby servo' }).ok);
+  const resumed = rooms.continueDestination(made.value.code, 'u1');
+  assert.ok(resumed.ok);
+  if (resumed.ok) {
+    assert.equal(resumed.value.cruising, true);
+    assert.equal(resumed.value.destination, null);
+  }
+});
+
 test('automatic regroup waits for sustained fresh GPS separation, and is off by default', () => {
   const c = clock();
   const rooms = new Rooms(c.now);
@@ -241,6 +264,7 @@ test('every client message is checked, and unlisted fields are dropped', () => {
   assert.deepEqual(ok({ t: 'convoy.join', code: 'abcd efgh' }), { ok: true, message: { t: 'convoy.join', code: 'ABCDEFGH' } });
   assert.deepEqual(ok({ t: 'convoy.dest', room: 'R', destination: null }), { ok: true, message: { t: 'convoy.dest', room: 'R', destination: null } });
   assert.deepEqual(ok({ t: 'convoy.rest', room: 'R', action: 'find' }), { ok: true, message: { t: 'convoy.rest', room: 'R', action: 'find' } });
+  assert.deepEqual(ok({ t: 'convoy.mode', room: 'R', cruising: true }), { ok: true, message: { t: 'convoy.mode', room: 'R', cruising: true } });
   assert.deepEqual(ok({ t: 'convoy.create', name: 'Run', automaticRegroup: { enabled: true, separationM: 7_000 } }), { ok: true, message: { t: 'convoy.create', name: 'Run', automaticRegroup: { enabled: true, separationM: 7_000 } } });
   for (const bad of [
     'not json', '[]', '7', '{}', { t: 7 }, { t: 'nope' },
@@ -250,6 +274,7 @@ test('every client message is checked, and unlisted fields are dropped', () => {
     { t: 'convoy.join', code: 'short' }, { t: 'convoy.join', code: 'ABCDEFG0' }, { t: 'convoy.join' },
     { t: 'convoy.create', name: 'x'.repeat(41) }, { t: 'convoy.create', name: 5 },
     { t: 'convoy.create', name: 'Run', automaticRegroup: { enabled: true, separationM: 999 } }, { t: 'convoy.create', name: 'Run', automaticRegroup: { enabled: 'yes', separationM: 5_000 } },
+    { t: 'convoy.mode', room: 'R', cruising: 'yes' },
     { t: 'convoy.dest', room: 'R', destination: { lat: 0, lng: 0, label: 'x'.repeat(81) } }, { t: 'convoy.dest', room: 'R', destination: 'home' },
     { t: 'convoy.lead', room: 'R' }, { t: 'convoy.cruise', eventId: '' },
   ]) {

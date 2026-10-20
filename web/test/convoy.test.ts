@@ -115,7 +115,7 @@ test('messages go to listeners, and garbage is ignored', () => {
 });
 
 const member = (id: string, patch: Partial<Member> = {}): Member => ({ id, username: id.toUpperCase(), avatar: '', online: true, lastSeen: 1000, position: null, ...patch });
-const room = (code: string, members: Member[], patch: Partial<Room> = {}): Room => ({ messages: [], code, name: code, eventId: null, leader: 'a', destination: null, resting: false, route: null, automaticRegroup: { enabled: false, separationM: 5_000 }, members, ...patch });
+const room = (code: string, members: Member[], patch: Partial<Room> = {}): Room => ({ messages: [], code, name: code, eventId: null, leader: 'a', destination: null, resting: false, cruising: false, route: null, automaticRegroup: { enabled: false, separationM: 5_000 }, members, ...patch });
 
 test('stalled handshakes and half-open connections time out and reconnect', () => {
   const { client, sockets, fire } = harness();

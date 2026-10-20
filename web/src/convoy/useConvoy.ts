@@ -148,6 +148,7 @@ export interface Convoy {
   joinCruise(eventId: string): void;
   leave(code?: string): void;
   setDestination(destination: Destination | null): void;
+  setCruising(cruising: boolean): void;
   rest(action: 'find' | 'continue'): void;
   setRoute(route: ConvoyRoute | null): void;
   handOver(to: string): void;
@@ -205,6 +206,7 @@ export function useConvoy(): Convoy {
     joinCruise: (eventId) => send({ t: 'convoy.cruise', eventId }),
     leave: (code) => { const c = code ?? room?.code; if (c) send({ t: 'convoy.leave', room: c }); },
     setDestination: (destination) => { if (room) send({ t: 'convoy.dest', room: room.code, destination }); },
+    setCruising: (cruising) => { if (room) send({ t: 'convoy.mode', room: room.code, cruising }); },
     rest: (action) => { if (room) send({ t: 'convoy.rest', room: room.code, action }); },
     setRoute: (route) => { if (room) send({ t: 'convoy.route', room: room.code, route: route && { ...route, name: route.name.slice(0, 40) } }); },
     handOver: (to) => { if (room) send({ t: 'convoy.lead', room: room.code, to }); },

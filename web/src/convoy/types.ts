@@ -28,6 +28,7 @@ export interface Room {
   leader: string;
   destination: Destination | null;
   resting: boolean;
+  cruising: boolean;
   route: ConvoyRoute | null;
   automaticRegroup: AutomaticRegroup;
   members: Member[];
@@ -56,6 +57,7 @@ export type ClientMessage =
   | { t: 'convoy.cruise'; eventId: string }
   | { t: 'convoy.leave'; room: string }
   | { t: 'convoy.dest'; room: string; destination: Destination | null }
+  | { t: 'convoy.mode'; room: string; cruising: boolean }
   | { t: 'convoy.rest'; room: string; action: 'find' | 'continue' }
   | { t: 'convoy.route'; room: string; route: ConvoyRoute | null }
   | { t: 'convoy.lead'; room: string; to: string }

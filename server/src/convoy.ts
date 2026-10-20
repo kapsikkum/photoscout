@@ -81,6 +81,8 @@ interface Room {
   /** The original destination while the convoy is temporarily paused at a rest stop. */
   resumeDestination: Destination | null;
   resting: boolean;
+  /** A leader-controlled no-destination state; route guidance is deliberately cleared. */
+  cruising: boolean;
   route: ConvoyRoute | null;
   automaticRegroup: AutomaticRegroup;
   separatedSince: number | null;
@@ -105,6 +107,7 @@ export interface RoomView {
   leader: string;
   destination: Destination | null;
   resting: boolean;
+  cruising: boolean;
   route: ConvoyRoute | null;
   automaticRegroup: AutomaticRegroup;
   members: { id: string; username: string; avatar: string; online: boolean; lastSeen: number; position: Position | null }[];
@@ -130,7 +133,7 @@ export class Rooms {
     room.messages = room.messages.filter((m) => this.now() - m.ts < CONVOY_MESSAGE_TTL_MS);
     return {
       messages: room.messages.map((m) => ({ ...m })),
-      code: room.code, name: room.name, eventId: room.eventId, leader: room.leader, destination: room.destination, resting: room.resting,
+      code: room.code, name: room.name, eventId: room.eventId, leader: room.leader, destination: room.destination, resting: room.resting, cruising: room.cruising,
       route: room.route && { name: room.route.name, stops: room.route.stops.map((p) => [...p] as [number, number]) },
       automaticRegroup: { ...room.automaticRegroup },
       members: [...room.members.values()].sort((a, b) => a.joinedAt - b.joinedAt).map((m) => ({
@@ -179,6 +182,7 @@ export class Rooms {
       destination: opts.destination ?? null,
       resumeDestination: null,
       resting: false,
+      cruising: false,
       route: opts.route ? { name: opts.route.name.trim().slice(0, MAX_NAME) || 'Convoy route', stops: opts.route.stops.map((p) => [...p] as [number, number]) } : null,
       automaticRegroup: opts.automaticRegroup ?? { enabled: false, separationM: DEFAULT_REGROUP_SEPARATION_M },
       separatedSince: null,
@@ -250,6 +254,25 @@ export class Rooms {
     room.destination = destination && { ...destination, label: destination.label.trim().slice(0, MAX_LABEL) };
     room.resumeDestination = null;
     room.resting = false;
+    room.cruising = false;
+    room.separatedSince = null;
+    room.regroupPending = false;
+    return { ok: true, value: this.view(code)! };
+  }
+
+  /** Leader-only free cruising: keep the convoy together without a destination or shared route. */
+  setCruising(code: string, userId: string, cruising: boolean): Outcome {
+    const room = this.room(code);
+    if (!room?.members.has(userId)) return fail('You are not in that convoy');
+    if (room.leader !== userId) return fail('Only the leader can change convoy mode');
+    room.navigationVersion++;
+    room.cruising = cruising;
+    if (cruising) {
+      room.destination = null;
+      room.resumeDestination = null;
+      room.resting = false;
+      room.route = null;
+    }
     room.separatedSince = null;
     room.regroupPending = false;
     return { ok: true, value: this.view(code)! };

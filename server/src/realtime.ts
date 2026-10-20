@@ -158,12 +158,15 @@ function handle(conn: Conn, m: ClientMessage): void {
     }
     case 'convoy.dest':
     case 'convoy.route':
-    case 'convoy.lead': {
+    case 'convoy.lead':
+    case 'convoy.mode': {
       const done = m.t === 'convoy.dest'
         ? rooms.setDestination(m.room, conn.userId, m.destination)
         : m.t === 'convoy.route'
           ? rooms.setRoute(m.room, conn.userId, m.route)
-          : rooms.handOver(m.room, conn.userId, m.to);
+          : m.t === 'convoy.mode'
+            ? rooms.setCruising(m.room, conn.userId, m.cruising)
+            : rooms.handOver(m.room, conn.userId, m.to);
       return done.ok ? announce(m.room) : error(done.error);
     }
     case 'convoy.rest': {

@@ -34,6 +34,7 @@ export default function DriveConvoy() {
 
   if (!view) return null;
   const dest = view.destination;
+  const leader = view.leader === convoy.me;
   return (
     <div className={`driveconvoy${expanded ? ' is-expanded' : ''}`} onKeyDown={(event) => { if (event.key === 'Escape') setExpanded(false); }}>
       <button className="driveconvoy__name" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
@@ -44,6 +45,10 @@ export default function DriveConvoy() {
       </button>
       {expanded && <div className="driveconvoy__panel" role="region" aria-label="Convoy controls">
         <ConvoyConnection />
+      {leader && <button type="button" className="secondary" onClick={() => convoy.setCruising(!view.cruising)}>
+        {view.cruising ? 'Resume guided convoy' : 'Just cruise'}
+      </button>}
+      {view.cruising && <p className="hint">Just cruising — no shared destination or route.</p>}
       {dest && (
         <button type="button" className="primary" onClick={() => goTo(dest.lat, dest.lng, dest.label || 'Convoy destination')}>
           {convoy.room?.resting ? 'Preview rest stop' : 'Drive to'} {dest.label || 'the convoy’s destination'}
