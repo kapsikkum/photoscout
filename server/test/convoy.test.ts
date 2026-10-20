@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  AUTO_REGROUP_DELAY_MS, CODE_LENGTH, CODE_PATTERN, MAX_MEMBERS, MAX_ROOMS_PER_USER, MEMBER_GRACE_MS, MissLimiter, newCode, normalizeCode, POSITION_GAP_MS, ROOM_IDLE_MS, Rooms,
+  AUTO_REGROUP_DELAY_MS, AUTO_REGROUP_FRESH_MS, CODE_LENGTH, CODE_PATTERN, MAX_MEMBERS, MAX_ROOMS_PER_USER, MEMBER_GRACE_MS, MissLimiter, newCode, normalizeCode, POSITION_GAP_MS, ROOM_IDLE_MS, Rooms,
 } from '../src/convoy.js';
 import { parseClientMessage } from '../src/wsMessages.js';
 
@@ -266,6 +266,12 @@ test('every client message is checked, and unlisted fields are dropped', () => {
   assert.deepEqual(ok({ t: 'convoy.rest', room: 'R', action: 'find' }), { ok: true, message: { t: 'convoy.rest', room: 'R', action: 'find' } });
   assert.deepEqual(ok({ t: 'convoy.mode', room: 'R', cruising: true }), { ok: true, message: { t: 'convoy.mode', room: 'R', cruising: true } });
   assert.deepEqual(ok({ t: 'convoy.create', name: 'Run', automaticRegroup: { enabled: true, separationM: 7_000 } }), { ok: true, message: { t: 'convoy.create', name: 'Run', automaticRegroup: { enabled: true, separationM: 7_000 } } });
+  assert.deepEqual(ok({ t: 'convoy.create', name: 'Run', open: true, automaticRegroup: { enabled: true, separationM: 7_000 } }), { ok: true, message: { t: 'convoy.create', name: 'Run', automaticRegroup: { enabled: true, separationM: 7_000 }, open: true } });
+  assert.deepEqual(ok({ t: 'open_cruise.toggle', enabled: true }), { ok: true, message: { t: 'open_cruise.toggle', enabled: true } });
+  assert.deepEqual(ok({ t: 'open_convoy.invite', targetUserId: 'u2' }), { ok: true, message: { t: 'open_convoy.invite', targetUserId: 'u2' } });
+  assert.deepEqual(ok({ t: 'open_convoy.accept', fromUserId: 'u1' }), { ok: true, message: { t: 'open_convoy.accept', fromUserId: 'u1' } });
+  assert.deepEqual(ok({ t: 'open_convoy.decline', fromUserId: 'u1' }), { ok: true, message: { t: 'open_convoy.decline', fromUserId: 'u1' } });
+  assert.deepEqual(ok({ t: 'open_convoy.join', code: 'abcd efgh' }), { ok: true, message: { t: 'open_convoy.join', code: 'ABCDEFGH' } });
   for (const bad of [
     'not json', '[]', '7', '{}', { t: 7 }, { t: 'nope' },
     { t: 'pos', lat: 91, lng: 0 }, { t: 'pos', lat: 0, lng: 181 }, { t: 'pos', lat: '1', lng: 0 }, { t: 'pos', lat: null, lng: 0 },
@@ -277,8 +283,157 @@ test('every client message is checked, and unlisted fields are dropped', () => {
     { t: 'convoy.mode', room: 'R', cruising: 'yes' },
     { t: 'convoy.dest', room: 'R', destination: { lat: 0, lng: 0, label: 'x'.repeat(81) } }, { t: 'convoy.dest', room: 'R', destination: 'home' },
     { t: 'convoy.lead', room: 'R' }, { t: 'convoy.cruise', eventId: '' },
+    { t: 'open_cruise.toggle', enabled: 'yes' },
+    { t: 'open_convoy.join', code: 'bad' },
   ]) {
     assert.equal(ok(bad).ok, false, JSON.stringify(bad));
   }
   assert.equal(parseClientMessage('{"t":"pos","lat":NaN}').ok, false);
+});
+
+test('open cruise registers drivers and shares positions outside any convoy room', () => {
+  const c = clock();
+  const rooms = new Rooms(c.now);
+  rooms.setOpenCruise(who(1), true);
+  rooms.setOpenCruise(who(2), true);
+  assert.equal(rooms.isOpenCruise('u1'), true);
+  assert.equal(rooms.isOpenCruise('u2'), true);
+  assert.equal(rooms.isOpenCruise('u3'), false);
+  assert.equal(rooms.getOpenCruiseUsers().length, 2);
+
+  const pos1 = rooms.position('u1', { lat: -33.86, lng: 151.2, heading: 45, speed: 12 });
+  assert.ok(pos1);
+  assert.equal(pos1.openCruise, true);
+  assert.deepEqual(pos1.codes, []);
+  assert.equal(rooms.getOpenCruiseUser('u1')!.position?.lat, -33.86);
+
+  rooms.setOpenCruise(who(1), false);
+  assert.equal(rooms.isOpenCruise('u1'), false);
+  assert.equal(rooms.getOpenCruiseUsers().length, 1);
+});
+
+test('matching two nearby open cruise users creates an open convoy with the initiator as leader', () => {
+  const c = clock();
+  const rooms = new Rooms(c.now);
+  rooms.setOpenCruise(who(1), true);
+  rooms.setOpenCruise(who(2), true);
+  rooms.position('u1', { lat: -33.86, lng: 151.2, heading: 0, speed: 0 });
+  c.t += POSITION_GAP_MS;
+  rooms.position('u2', { lat: -33.859, lng: 151.201, heading: 0, speed: 0 });
+
+  const invited = rooms.createOpenConvoyInvite(who(1), 'u2');
+  assert.ok(invited.ok);
+
+  const accepted = rooms.acceptOpenConvoyInvite('u1', who(2));
+  assert.ok(accepted.ok);
+  assert.equal(accepted.value.open, true);
+  assert.equal(accepted.value.leader, 'u1', 'initiator is the leader');
+  assert.equal(accepted.value.members.length, 2);
+
+  const openList = rooms.openConvoys();
+  assert.equal(openList.length, 1);
+  assert.equal(openList[0].code, accepted.value.code);
+  assert.equal(openList[0].leader, 'u1');
+  assert.equal(openList[0].centroid, null, 'the new convoy starts without copied individual coordinates');
+
+  rooms.position('u1', { lat: -33.8, lng: 151.0, heading: 0, speed: 0 });
+  c.t += POSITION_GAP_MS;
+  rooms.position('u2', { lat: -33.6, lng: 151.2, heading: 0, speed: 0 });
+
+  const withCentroid = rooms.openConvoys();
+  assert.ok(withCentroid[0].centroid);
+  assert.ok(Math.abs(withCentroid[0].centroid.lat - (-33.7)) < 0.001);
+  assert.ok(Math.abs(withCentroid[0].centroid.lng - 151.1) < 0.001);
+});
+
+test('open convoy invitations require fresh nearby locations, and public centroids omit stale positions', () => {
+  const c = clock();
+  const rooms = new Rooms(c.now);
+  rooms.setOpenCruise(who(1), true);
+  rooms.setOpenCruise(who(2), true);
+  assert.equal(rooms.createOpenConvoyInvite(who(1), 'u2').ok, false, 'locations are required');
+
+  rooms.position('u1', { lat: -33.8, lng: 151.0, heading: null, speed: null });
+  c.t += POSITION_GAP_MS;
+  rooms.position('u2', { lat: -33.6, lng: 151.2, heading: null, speed: null });
+  assert.equal(rooms.createOpenConvoyInvite(who(1), 'u2').ok, false, 'distant drivers cannot create an invite');
+
+  c.t += POSITION_GAP_MS;
+  rooms.position('u2', { lat: -33.8005, lng: 151.0005, heading: null, speed: null });
+  assert.ok(rooms.createOpenConvoyInvite(who(1), 'u2').ok);
+  const accepted = rooms.acceptOpenConvoyInvite('u1', who(2));
+  assert.ok(accepted.ok);
+  c.t += POSITION_GAP_MS;
+  rooms.position('u1', { lat: -33.8, lng: 151.0, heading: null, speed: null });
+  c.t += POSITION_GAP_MS;
+  rooms.position('u2', { lat: -33.8005, lng: 151.0005, heading: null, speed: null });
+  assert.ok(rooms.openConvoys()[0].centroid);
+
+  c.t += AUTO_REGROUP_FRESH_MS + 1;
+  assert.equal(rooms.openConvoys()[0].centroid, null, 'the public marker does not retain stale coordinates');
+  assert.equal(rooms.getOpenCruiseUser('u1')!.position, null, 'stale individual positions are not projected either');
+});
+
+test('distance join to an open convoy flags newMember and does not trigger automatic regroup until within 500m', () => {
+  const c = clock();
+  const rooms = new Rooms(c.now);
+  const route = { name: 'Coastal run', stops: [[151.0, -33.0], [151.5, -33.5]] as [number, number][] };
+  const created = rooms.create(who(1), { route, open: true, automaticRegroup: { enabled: true, separationM: 5_000 } });
+  assert.ok(created.ok);
+  const code = created.value.code;
+  assert.ok(rooms.join(code, who(2)).ok);
+
+  // Position leaders close together
+  rooms.position('u1', { lat: -33.0, lng: 151.0, heading: null, speed: null });
+  c.t += POSITION_GAP_MS;
+  rooms.position('u2', { lat: -33.001, lng: 151.001, heading: null, speed: null });
+
+  // User 3 joins open convoy from a distance
+  const joined = rooms.joinOpenConvoy(code, who(3));
+  assert.ok(joined.ok);
+  assert.equal(rooms.view(code)!.members.find((m) => m.id === 'u3')?.newMember, true);
+
+  // User 3 sends a position far away (50 km away)
+  c.t += POSITION_GAP_MS;
+  const farPos = rooms.position('u3', { lat: -33.5, lng: 151.0, heading: null, speed: null });
+  assert.ok(farPos);
+  assert.deepEqual(farPos.automaticRegroupCodes, [], 'newMember far away does NOT trigger automatic regroup');
+  assert.equal(rooms.view(code)!.members.find((m) => m.id === 'u3')?.newMember, true);
+
+  // User 3 reaches within 500m of the group
+  c.t += POSITION_GAP_MS;
+  const nearPos = rooms.position('u3', { lat: -33.002, lng: 151.002, heading: null, speed: null });
+  assert.ok(nearPos);
+  assert.deepEqual(nearPos.memberStatusChangedCodes, [code], 'reaches group and clears newMember flag');
+  assert.equal(rooms.view(code)!.members.find((m) => m.id === 'u3')?.newMember, undefined);
+});
+
+test('leader can turn a private convoy into an open convoy and back to private', () => {
+  const c = clock();
+  const rooms = new Rooms(c.now);
+  const created = rooms.create(who(1), { open: false });
+  assert.ok(created.ok);
+  const code = created.value.code;
+  assert.equal(rooms.view(code)!.open, false);
+  assert.equal(rooms.openConvoys().length, 0);
+
+  // Non-member cannot change visibility
+  assert.equal(rooms.setOpen(code, 'u2', true).ok, false);
+
+  // Member (non-leader) cannot change visibility
+  assert.ok(rooms.join(code, who(2)).ok);
+  assert.equal(rooms.setOpen(code, 'u2', true).ok, false);
+
+  // Leader turns private convoy into open convoy
+  const makeOpen = rooms.setOpen(code, 'u1', true);
+  assert.ok(makeOpen.ok);
+  assert.equal(rooms.view(code)!.open, true);
+  assert.equal(rooms.openConvoys().length, 1);
+  assert.equal(rooms.openConvoys()[0].code, code);
+
+  // Leader turns open convoy back to private
+  const makePrivate = rooms.setOpen(code, 'u1', false);
+  assert.ok(makePrivate.ok);
+  assert.equal(rooms.view(code)!.open, false);
+  assert.equal(rooms.openConvoys().length, 0);
 });

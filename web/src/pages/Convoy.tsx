@@ -113,19 +113,48 @@ function ConvoyPage() {
 function Entry({ convoy, code, setCode }: { convoy: ConvoyApi; code: string; setCode: (c: string) => void }) {
   const [name, setName] = useState('');
   const [automaticRegroup, setAutomaticRegroup] = useState(false);
+  const [openConvoy, setOpenConvoy] = useState(false);
   const [separationKm, setSeparationKm] = useState(5);
   const ready = convoy.status === 'open';
+
   const create = (e: FormEvent) => {
     e.preventDefault();
-    convoy.create(name, { enabled: automaticRegroup, separationM: separationKm * 1_000 });
+    convoy.create(name, { enabled: automaticRegroup, separationM: separationKm * 1_000 }, openConvoy);
     setName('');
   };
   const join = (e: FormEvent) => { e.preventDefault(); convoy.join(code); setCode(''); };
+
   return (
     <div className="convoy__entry">
+      {/* Open Cruise Mode Card */}
+      <div className="convoy__card open-cruise-card">
+        <h2>Open Cruise</h2>
+        <p className="hint">
+          In this mode your location is visible to everyone also with Open Cruise enabled. If two or more Open Cruise users are within 500m of each other, you can form an Open Convoy.
+        </p>
+        <div className="open-cruise-card__action">
+          <button
+            type="button"
+            className={convoy.openCruise ? 'primary' : 'secondary'}
+            onClick={() => convoy.setOpenCruise(!convoy.openCruise)}
+          >
+            {convoy.openCruise ? 'Open Cruise: Enabled' : 'Enable Open Cruise'}
+          </button>
+          {convoy.openCruise && (
+            <span className="open-cruise-card__status">
+              ● Active · {convoy.openCruiseUsers.length} other driver{convoy.openCruiseUsers.length === 1 ? '' : 's'} on map
+            </span>
+          )}
+        </div>
+      </div>
+
       <form className="convoy__card" onSubmit={create}>
         <h2>Start a convoy</h2>
         <input value={name} maxLength={40} placeholder="Name (optional)" onChange={(e) => setName(e.target.value)} />
+        <label className="toggle">
+          <input type="checkbox" checked={openConvoy} onChange={(e) => setOpenConvoy(e.target.checked)} />
+          Open convoy (visible on map to Open Cruise drivers)
+        </label>
         <label className="toggle">
           <input type="checkbox" checked={automaticRegroup} onChange={(e) => setAutomaticRegroup(e.target.checked)} />
           Automatic regroup when the group spreads out
@@ -176,13 +205,29 @@ function InRoom({ convoy }: { convoy: ConvoyApi }) {
       )}
       <div className="convoy__head">
         <div>
-          <h2>{room.name}</h2>
+          <h2>
+            {room.name}
+            {room.open
+              ? <span className="open-convoy-badge">Open Convoy</span>
+              : <span className="open-convoy-badge open-convoy-badge--private">Private Convoy</span>}
+          </h2>
           <p className="hint">
             Code <strong className="convoy__codeshown">{spaced(room.code)}</strong>
             {room.eventId && <> · <Link to={`/events?open=${room.eventId}`}>the cruise</Link></>}
+            {room.open ? ' · Visible to all Open Cruise drivers' : ' · Private (invite code only)'}
           </p>
         </div>
         <div className="eventcard__actions">
+          {iLead && (
+            <button
+              type="button"
+              className={room.open ? 'secondary' : 'primary'}
+              onClick={() => convoy.setOpen(!room.open)}
+              title={room.open ? 'Make this convoy private (invite code only)' : 'Make this convoy open (visible on map to Open Cruise drivers)'}
+            >
+              {room.open ? 'Make Private' : 'Make Open'}
+            </button>
+          )}
           <button onClick={() => void share()}>Share invite</button>
           <button onClick={() => convoy.leave()}>Leave</button>
         </div>
@@ -212,6 +257,9 @@ function InRoom({ convoy }: { convoy: ConvoyApi }) {
         )}
         {iLead && (
           <div className="eventcard__actions">
+            <button onClick={() => convoy.setOpen(!room.open)}>
+              {room.open ? 'Make private convoy' : 'Make open convoy'}
+            </button>
             <button onClick={() => convoy.setCruising(!room.cruising)}>{room.cruising ? 'Resume guided convoy' : 'Just cruise'}</button>
             {picking
               ? <>
@@ -237,6 +285,7 @@ function InRoom({ convoy }: { convoy: ConvoyApi }) {
               <Link to={`/u/${encodeURIComponent(m.username)}`}>{m.username}</Link>
               {m.id === convoy.me && <span className="eventbadge">You</span>}
               {m.id === room.leader && <span className="eventbadge eventbadge--community">Leader</span>}
+              {m.newMember && <span className="catching-up-pill">Catching up</span>}
               <span className="hint">
                 {m.online
                   ? (shown.position ? [speedText(shown.position.speed), `updated ${lastSeenText(shown.position.ts)}`].filter(Boolean).join(' · ') : 'connected, not sharing')

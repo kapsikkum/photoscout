@@ -52,7 +52,7 @@ export const CATEGORIES: Category[] = [
   { key: 'spots', label: 'Spots & places', group: 'Overlays', swatch: 'dot', color: '#4cc3ff', defaultOn: true,
     match: ids('spot-points', 'spot-label', 'spot-thumbs', 'place-spots', 'place-spots-label', 'place-spot-thumbs', 'clusters', 'cluster-count', 'place-fill', 'place-line') },
   { key: 'routes', label: 'Routes', group: 'Overlays', swatch: 'line', color: '#f97316', paintProp: 'line-color', defaultOn: true,
-    match: ids('route-glow', 'route-casing', 'route-lines', 'route-arrows', 'route-staging-halo', 'route-staging') },
+    match: ids('route-glow', 'route-casing', 'route-lines', 'route-pulse', 'route-arrows', 'route-staging-halo', 'route-staging') },
   { key: 'sun', label: 'Sun/moon rays & light wedges', group: 'Overlays', swatch: 'line', color: '#ffd23f', defaultOn: true, match: ids('rays', 'wedges') },
   { key: 'terrain', label: 'Relief & shadows', group: 'Overlays', swatch: 'fill', color: '#5a5f6e', defaultOn: true, match: ids('hillshade', 'terrain-shadow', 'shadows') },
   { key: 'imagery', label: 'Satellite', group: 'Overlays', swatch: 'fill', color: '#3b5a3a', defaultOn: false, match: ids('imagery') },

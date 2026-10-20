@@ -2,6 +2,9 @@ import { loadRoads, type RoadsStatus } from '../map/roadQuality';
 import ActivityLog from '../components/ActivityLog.js';
 import { MapConvoy } from '../convoy/ConvoySession.js';
 import { useConvoyHandoff } from '../convoy/useConvoyHandoff.js';
+import { useConvoy } from '../convoy/useConvoy.js';
+import { OpenCruiseDock } from '../convoy/OpenCruiseDock.js';
+import type { OpenConvoySummary } from '../convoy/types.js';
 import { convoyNavigationRequest, shouldRefreshConvoyNavigation } from '../convoy/navigation.js';
 import { logActivity, logSuccessIfNews } from '../activity.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -102,7 +105,11 @@ const RADAR_POLL_MS = 10 * 60_000;
 type RouteHistoryEntry = { draft: RouteDraft; duration: number | null; ready: boolean };
 
 export default function MapPage({ user }: { user: User | null }) {
-  const convoy = useConvoyHandoff(Boolean(user));
+  const convoyHandoff = useConvoyHandoff(Boolean(user));
+  const convoy = useConvoy(Boolean(user));
+  const [cruiseDockOpen, setCruiseDockOpen] = useState(false);
+  const [cruiseDockDismissed, setCruiseDockDismissed] = useState(false);
+  const [selectedOpenConvoy, setSelectedOpenConvoy] = useState<OpenConvoySummary | null>(null);
   const container = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<MlMap | null>(null);
   const [places, setPlaces] = useState<Place[]>([]);
@@ -136,8 +143,8 @@ export default function MapPage({ user }: { user: User | null }) {
   const initialMapPoint = useRef(params.has('lat') && params.has('lng') && Number.isFinite(Number(params.get('lat'))) && Number.isFinite(Number(params.get('lng'))) && Math.abs(Number(params.get('lat'))) <= 90 && Math.abs(Number(params.get('lng'))) <= 180
     ? { lat: Number(params.get('lat')), lng: Number(params.get('lng')) } : null);
   const { time, setTime } = useMapTime();
-  const convoyNavigation = useMemo(() => convoyNavigationRequest(convoy.position, convoy.destination), [
-    convoy.position?.lat, convoy.position?.lng, convoy.destination?.lat, convoy.destination?.lng,
+  const convoyNavigation = useMemo(() => convoyNavigationRequest(convoyHandoff.position, convoyHandoff.destination), [
+    convoyHandoff.position?.lat, convoyHandoff.position?.lng, convoyHandoff.destination?.lat, convoyHandoff.destination?.lng,
   ]);
   const lastConvoyNavigation = useRef<ReturnType<typeof convoyNavigationRequest>>(null);
   const convoyNavigationAbort = useRef<AbortController | null>(null);
@@ -268,7 +275,7 @@ export default function MapPage({ user }: { user: User | null }) {
       convoyNavigationAbort.current = null;
       lastConvoyNavigation.current = null;
       source.setData(convoyNavigationData([]));
-      setConvoyNavigationNote(convoy.active && convoy.destination ? (convoy.geoError || 'Share your position to show the route to the convoy destination.') : '');
+      setConvoyNavigationNote(convoyHandoff.active && convoyHandoff.destination ? (convoyHandoff.geoError || 'Share your position to show the route to the convoy destination.') : '');
       return;
     }
     if (!shouldRefreshConvoyNavigation(lastConvoyNavigation.current, convoyNavigation)) return;
@@ -284,7 +291,7 @@ export default function MapPage({ user }: { user: User | null }) {
       .catch((err: unknown) => {
         if (!abort.signal.aborted) setConvoyNavigationNote((err as Error).message);
       });
-  }, [map, convoyNavigation, convoy.active, convoy.destination, convoy.geoError]);
+  }, [map, convoyNavigation, convoyHandoff.active, convoyHandoff.destination, convoyHandoff.geoError]);
 
   useEffect(() => { void reload(); }, []);
 
@@ -1303,8 +1310,23 @@ export default function MapPage({ user }: { user: User | null }) {
   return (
     <div className={`mapshell${isPanelActive ? ' mapshell--panel' : ''}${editing ? ' mapshell--editing' : ''}${weatherOn && forecast ? ' mapshell--has-weather' : ''}${timeControlsVisible ? '' : ' mapshell--time-hidden'}`}>
       <div ref={container} className="mapshell__map" />
-      {user && <MapConvoy map={map} />}
-      {convoy.active && convoy.destination && convoyNavigationNote && (
+      {user && (
+        <MapConvoy
+          map={map}
+          selectedOpenConvoy={selectedOpenConvoy}
+          onCloseSelectedOpenConvoy={() => setSelectedOpenConvoy(null)}
+        />
+      )}
+      <OpenCruiseDock
+        open={cruiseDockOpen || (convoy.openCruise && !cruiseDockDismissed)}
+        onClose={() => {
+          setCruiseDockOpen(false);
+          setCruiseDockDismissed(true);
+        }}
+        onSelectConvoy={(c) => setSelectedOpenConvoy(c)}
+        isLoggedIn={Boolean(user)}
+      />
+      {convoyHandoff.active && convoyHandoff.destination && convoyNavigationNote && (
         <div className="mapinstruction" role="status">{convoyNavigationNote}</div>
       )}
       {follow && (
@@ -1365,6 +1387,24 @@ export default function MapPage({ user }: { user: User | null }) {
         {user && <Link className="chip" to="/drive" title="Turn-by-turn navigation for the car">Drive</Link>}
         <MapMenus menus={[
           { label: 'Live', items: [
+            {
+              key: 'opencruise',
+              label: 'Open Cruise',
+              swatch: <span className={`open-cruise-dot${convoy.openCruise ? ' is-active' : ''}`} style={{ margin: 0, width: 8, height: 8 }} />,
+              on: convoy.openCruise,
+              title: 'Live Open Cruise: broadcast location and match with nearby drivers',
+              onSelect: () => {
+                setCruiseDockDismissed(false);
+                if (!convoy.openCruise) {
+                  convoy.setOpenCruise(true);
+                  setCruiseDockOpen(true);
+                } else if (cruiseDockDismissed || !cruiseDockOpen) {
+                  setCruiseDockOpen(true);
+                } else {
+                  convoy.setOpenCruise(false);
+                }
+              },
+            },
             { key: 'planes', label: category('planes').label, swatch: <Swatch cat={category('planes')} />, on: planesOn, title: 'Live aircraft, dead-reckoned 15 minutes ahead', onSelect: () => toggle('planes') },
             { key: 'trains', label: category('trains').label, swatch: <Swatch cat={category('trains')} />, on: trainsOn, title: 'Live passenger train positions, refreshed every 20s (needs a TfNSW key)', onSelect: () => toggle('trains') },
             { key: 'weather', label: category('weather').label, swatch: <Swatch cat={category('weather')} />, on: weatherOn, title: 'Rain radar (RainViewer, recent past only) and the forecast at the map centre for the map time', onSelect: () => toggle('weather') },
@@ -1516,10 +1556,10 @@ export default function MapPage({ user }: { user: User | null }) {
               </ul>
               <div className="panel__actions">
                 <Link to={`/places/${selectedPlace.id}`}><button>Place page</button></Link>
-                {user && (convoy.active
-                  ? <button disabled={!convoy.canSet} title={convoy.disabledReason} onClick={() => convoy.setPoint(selectedPlace.lat, selectedPlace.lng, selectedPlace.name)}>Convoy there</button>
+                {user && (convoyHandoff.active
+                  ? <button disabled={!convoyHandoff.canSet} title={convoyHandoff.disabledReason} onClick={() => convoyHandoff.setPoint(selectedPlace.lat, selectedPlace.lng, selectedPlace.name)}>Convoy there</button>
                   : <Link to={`/drive?to=${selectedPlace.lat},${selectedPlace.lng}`}><button>Drive there</button></Link>)}
-                {user && !convoy.active && <Link to={`/convoy?to=${selectedPlace.lat},${selectedPlace.lng}&label=${encodeURIComponent(selectedPlace.name)}`}><button>Set convoy destination</button></Link>}
+                {user && !convoyHandoff.active && <Link to={`/convoy?to=${selectedPlace.lat},${selectedPlace.lng}&label=${encodeURIComponent(selectedPlace.name)}`}><button>Set convoy destination</button></Link>}
                 {canEdit(selectedPlace.ownerId) && <>
                   <button className="primary" onClick={() => setEditing({ type: 'place', draft: placeToDraft(selectedPlace) })}>Edit</button>
                   <button onClick={() => { setSelected(null); setEditing({ type: 'spot', draft: newSpot(selectedPlace.lat, selectedPlace.lng, selectedPlace.id) }); }}>+ Spot in place</button>
@@ -1534,10 +1574,10 @@ export default function MapPage({ user }: { user: User | null }) {
               {selectedRoute.notes && <p className="panel__notes">{selectedRoute.notes}</p>}
               <div className="panel__actions">
                 <Link to={`/plan?route=${selectedRoute.id}`}><button>Plan shoot</button></Link>
-                {user && (convoy.active
-                  ? <button disabled={!convoy.canSet} title={convoy.disabledReason} onClick={() => convoy.setRoute(selectedRoute)}>Convoy there</button>
+                {user && (convoyHandoff.active
+                  ? <button disabled={!convoyHandoff.canSet} title={convoyHandoff.disabledReason} onClick={() => convoyHandoff.setRoute(selectedRoute)}>Convoy there</button>
                   : <Link to={`/drive?route=${selectedRoute.id}`}><button>Drive it</button></Link>)}
-                {user && !convoy.active && <Link to={`/convoy?route=${selectedRoute.id}`}><button>Share with convoy</button></Link>}
+                {user && !convoyHandoff.active && <Link to={`/convoy?route=${selectedRoute.id}`}><button>Share with convoy</button></Link>}
                 {canEdit(selectedRoute.ownerId) && <><button className="primary" onClick={() => openRouteEdit(routeToDraft(selectedRoute))}>Edit</button><button className="danger" onClick={() => void deleteRoute(selectedRoute)}>Delete</button></>}
               </div>
             </>

@@ -16,6 +16,8 @@ export interface Member {
   lastSeen: number;
   /** Only while online; a member who drops off has none. */
   position: Position | null;
+  /** Joined an open convoy from a distance and has not yet reached the group. */
+  newMember?: boolean;
 }
 
 export interface Room {
@@ -31,7 +33,27 @@ export interface Room {
   cruising: boolean;
   route: ConvoyRoute | null;
   automaticRegroup: AutomaticRegroup;
+  open: boolean;
   members: Member[];
+}
+
+export interface OpenConvoySummary {
+  code: string;
+  name: string;
+  leader: string;
+  members: { id: string; username: string; avatar: string; newMember?: boolean }[];
+  destination: Destination | null;
+  cruising: boolean;
+  resting: boolean;
+  centroid: { lat: number; lng: number } | null;
+}
+
+export interface OpenCruiseUser {
+  id: string;
+  username: string;
+  avatar: string;
+  position: Position | null;
+  lastSeen: number;
 }
 
 export type ServerMessage =
@@ -45,19 +67,33 @@ export type ServerMessage =
   | { t: 'chat.ready' }
   | { t: 'chat'; message: import('../api.js').ChatMessage }
   | { t: 'chat.gone'; id: string }
-  | { t: 'chat.refresh' };
+  | { t: 'chat.refresh' }
+  | { t: 'open_cruise.state'; enabled: boolean; users: OpenCruiseUser[]; convoys: OpenConvoySummary[] }
+  | { t: 'open_cruise.pos'; user: OpenCruiseUser }
+  | { t: 'open_cruise.pos_stop'; id: string }
+  | { t: 'open_cruise.user_joined'; user: OpenCruiseUser }
+  | { t: 'open_cruise.user_left'; id: string }
+  | { t: 'open_cruise.convoys'; convoys: OpenConvoySummary[] }
+  | { t: 'open_convoy.invited'; from: { id: string; username: string; avatar: string } }
+  | { t: 'open_convoy.declined'; from: { id: string; username: string } };
 
 export type ClientMessage =
   | { t: 'ping' }
   | { t: 'convoy.message'; room: string; text: string; clientId: string }
   | { t: 'chat.sub' }
   | { t: 'chat.unsub' }
-  | { t: 'convoy.create'; name: string; automaticRegroup: AutomaticRegroup }
+  | { t: 'open_cruise.toggle'; enabled: boolean }
+  | { t: 'open_convoy.invite'; targetUserId: string }
+  | { t: 'open_convoy.accept'; fromUserId: string }
+  | { t: 'open_convoy.decline'; fromUserId: string }
+  | { t: 'open_convoy.join'; code: string }
+  | { t: 'convoy.create'; name: string; automaticRegroup: AutomaticRegroup; open?: boolean }
   | { t: 'convoy.join'; code: string }
   | { t: 'convoy.cruise'; eventId: string }
   | { t: 'convoy.leave'; room: string }
   | { t: 'convoy.dest'; room: string; destination: Destination | null }
   | { t: 'convoy.mode'; room: string; cruising: boolean }
+  | { t: 'convoy.open'; room: string; open: boolean }
   | { t: 'convoy.rest'; room: string; action: 'find' | 'continue' }
   | { t: 'convoy.route'; room: string; route: ConvoyRoute | null }
   | { t: 'convoy.lead'; room: string; to: string }

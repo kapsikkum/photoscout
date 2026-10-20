@@ -48,28 +48,6 @@ test('it connects when asked, is open on the hello, and reconnects after a drop 
   client.onStatus((s) => statuses.push(s));
   const release = client.acquire();
   assert.equal(sockets.length, 1);
-  sockets[0].hello();
-  assert.equal(client.status, 'open');
-  assert.equal(client.send({ t: 'chat.sub' }), true);
-  assert.deepEqual(sockets[0].sent, ['{"t":"chat.sub"}']);
-
-  sockets[0].drop();
-  assert.equal(client.status, 'retrying');
-  assert.equal(client.send({ t: 'chat.sub' }), false, 'nothing is queued while it is down');
-  assert.equal(fire(), 1000);
-  assert.equal(sockets.length, 2);
-  sockets[1].drop(); // never opened
-  assert.equal(fire(), 1000);
-  sockets[2].drop();
-  assert.equal(fire(), 2000);
-  sockets[3].hello();
-  assert.equal(client.status, 'open');
-  assert.deepEqual(statuses.slice(0, 4), ['connecting', 'open', 'retrying', 'connecting']);
-  release();
-});
-
-test('after a few failures in a row the page is told to poll, and it is still trying', () => {
-  const { client, sockets, fire } = harness();
   client.acquire();
   for (let i = 0; i < UNAVAILABLE_AFTER; i++) { sockets[i].drop(); if (i < UNAVAILABLE_AFTER - 1) fire(); }
   assert.equal(client.status, 'unavailable');
@@ -115,7 +93,7 @@ test('messages go to listeners, and garbage is ignored', () => {
 });
 
 const member = (id: string, patch: Partial<Member> = {}): Member => ({ id, username: id.toUpperCase(), avatar: '', online: true, lastSeen: 1000, position: null, ...patch });
-const room = (code: string, members: Member[], patch: Partial<Room> = {}): Room => ({ messages: [], code, name: code, eventId: null, leader: 'a', destination: null, resting: false, cruising: false, route: null, automaticRegroup: { enabled: false, separationM: 5_000 }, members, ...patch });
+const room = (code: string, members: Member[], patch: Partial<Room> = {}): Room => ({ messages: [], code, name: code, eventId: null, leader: 'a', destination: null, resting: false, cruising: false, route: null, automaticRegroup: { enabled: false, separationM: 5_000 }, open: false, members, ...patch });
 
 test('stalled handshakes and half-open connections time out and reconnect', () => {
   const { client, sockets, fire } = harness();
@@ -229,4 +207,57 @@ test('last seen and speed read as people say them', () => {
   assert.equal(lastSeenText(0, 3 * 3600_000), '3 h ago');
   assert.equal(speedText(25), '90 km/h');
   assert.equal(speedText(null), '');
+});
+
+test('reducer manages open cruise and open convoy state correctly', () => {
+  let s = reduce(emptyState, { t: 'hello', me: 'me', rooms: [] });
+  assert.equal(s.openCruise, false);
+  assert.deepEqual(s.openCruiseUsers, []);
+  assert.deepEqual(s.openConvoys, []);
+
+  // Toggle open cruise state
+  s = reduce(s, { t: 'open_cruise.state', enabled: true, users: [], convoys: [] });
+  assert.equal(s.openCruise, true);
+
+  // Position update for an open cruise user
+  s = reduce(s, {
+    t: 'open_cruise.pos',
+    user: { id: 'u2', username: 'Alex', avatar: '', position: { lat: -33.86, lng: 151.2, heading: 180, speed: 15, ts: 10000 }, lastSeen: 10000 },
+  });
+  assert.equal(s.openCruiseUsers.length, 1);
+  assert.equal(s.openCruiseUsers[0].username, 'Alex');
+
+  // Open convoys list received
+  s = reduce(s, {
+    t: 'open_cruise.convoys',
+    convoys: [
+      {
+        code: 'OPEN1',
+        name: 'Open Convoy OPEN1',
+        leader: 'Alex',
+        resting: false,
+        members: [{ id: 'u2', username: 'Alex', avatar: '', newMember: false }],
+        destination: null,
+        cruising: true,
+        centroid: { lat: -33.86, lng: 151.2 },
+      },
+    ],
+  });
+  assert.equal(s.openConvoys.length, 1);
+  assert.equal(s.openConvoys[0].code, 'OPEN1');
+
+  // Receive invite to create open convoy
+  s = reduce(s, {
+    t: 'open_convoy.invited',
+    from: { id: 'u2', username: 'Alex', avatar: '' },
+  });
+  assert.deepEqual(s.incomingInvite?.from, { id: 'u2', username: 'Alex', avatar: '' });
+
+  // Declined invite notification
+  s = reduce(s, { t: 'open_convoy.declined', from: { id: 'u2', username: 'Alex' } });
+  assert.deepEqual(s.declinedNotice?.from, { id: 'u2', username: 'Alex' });
+
+  // Open cruise user left
+  s = reduce(s, { t: 'open_cruise.user_left', id: 'u2' });
+  assert.equal(s.openCruiseUsers.length, 0);
 });

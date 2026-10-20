@@ -33,6 +33,8 @@ export const MAX_REGROUP_SEPARATION_M = 20_000;
 export const AUTO_REGROUP_DELAY_MS = 90_000;
 /** Do not decide a group is split from a stale phone location. */
 export const AUTO_REGROUP_FRESH_MS = 35_000;
+/** Open Cruise pairing is deliberately close-range and needs two current GPS fixes. */
+export const OPEN_CRUISE_MATCH_DISTANCE_M = 500;
 
 /** No 0/O, 1/I/L: a code is read aloud and typed on a phone. 31^8 is about 8.5e11. */
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -69,6 +71,8 @@ interface Member extends Who {
   position: Position | null;
   joinedAt: number;
   lastMessageAt?: number;
+  /** Joined an open convoy from a distance and has not yet reached the group. */
+  newMember?: boolean;
 }
 
 interface Room {
@@ -96,6 +100,8 @@ interface Room {
   createdAt: number;
   /** When the last member went offline; null while somebody is connected. */
   emptySince: number | null;
+  /** Visible on the map to all users with Open Cruise enabled. */
+  open: boolean;
 }
 
 /** What goes to a client: ids and public profile only, the same as chat shows. */
@@ -110,7 +116,41 @@ export interface RoomView {
   cruising: boolean;
   route: ConvoyRoute | null;
   automaticRegroup: AutomaticRegroup;
-  members: { id: string; username: string; avatar: string; online: boolean; lastSeen: number; position: Position | null }[];
+  open: boolean;
+  members: { id: string; username: string; avatar: string; online: boolean; lastSeen: number; position: Position | null; newMember?: boolean }[];
+}
+
+export interface OpenConvoySummary {
+  code: string;
+  name: string;
+  leader: string;
+  members: { id: string; username: string; avatar: string; newMember?: boolean }[];
+  destination: Destination | null;
+  cruising: boolean;
+  resting: boolean;
+  centroid: { lat: number; lng: number } | null;
+}
+
+export interface OpenCruiseUser {
+  id: string;
+  username: string;
+  avatar: string;
+  position: Position | null;
+  lastSeen: number;
+}
+
+export interface OpenConvoyInvite {
+  from: Who;
+  toUserId: string;
+  createdAt: number;
+}
+
+export function convoyCentroid(members: { online?: boolean; position: Position | null }[]): { lat: number; lng: number } | null {
+  const valid = members.filter((m) => (m.online ?? true) && m.position);
+  if (valid.length === 0) return null;
+  const sumLat = valid.reduce((sum, m) => sum + m.position!.lat, 0);
+  const sumLng = valid.reduce((sum, m) => sum + m.position!.lng, 0);
+  return { lat: sumLat / valid.length, lng: sumLng / valid.length };
 }
 
 export type Outcome<T = RoomView> = { ok: true; value: T } | { ok: false; error: string };
@@ -120,6 +160,9 @@ export class Rooms {
   private rooms = new Map<string, Room>();
   private byEvent = new Map<string, string>();
   private byUser = new Map<string, Set<string>>();
+  private openCruiseUsers = new Map<string, OpenCruiseUser>();
+  private openConvoyInvites = new Map<string, OpenConvoyInvite>();
+  private openCruiseLastPos = new Map<string, number>();
 
   constructor(private now: () => number = Date.now, private makeCode: () => string = newCode) {}
 
@@ -136,8 +179,10 @@ export class Rooms {
       code: room.code, name: room.name, eventId: room.eventId, leader: room.leader, destination: room.destination, resting: room.resting, cruising: room.cruising,
       route: room.route && { name: room.route.name, stops: room.route.stops.map((p) => [...p] as [number, number]) },
       automaticRegroup: { ...room.automaticRegroup },
+      open: room.open,
       members: [...room.members.values()].sort((a, b) => a.joinedAt - b.joinedAt).map((m) => ({
         id: m.id, username: m.username, avatar: m.avatar, online: m.online, lastSeen: m.lastSeen, position: m.online ? m.position : null,
+        ...(m.newMember ? { newMember: true } : {}),
       })),
     };
   }
@@ -170,7 +215,7 @@ export class Rooms {
     return { ok: true, value: { ...message } };
   }
 
-  create(who: Who, opts: { name?: string; eventId?: string | null; destination?: Destination | null; route?: ConvoyRoute | null; automaticRegroup?: AutomaticRegroup } = {}): Outcome {
+  create(who: Who, opts: { name?: string; eventId?: string | null; destination?: Destination | null; route?: ConvoyRoute | null; automaticRegroup?: AutomaticRegroup; open?: boolean } = {}): Outcome {
     if (this.rooms.size >= MAX_ROOMS) return fail('Convoys are very busy right now. Try again shortly.');
     if ((this.byUser.get(who.id)?.size ?? 0) >= MAX_ROOMS_PER_USER) return fail(`You can be in ${MAX_ROOMS_PER_USER} convoys at once: leave one first`);
     if (opts.eventId && this.byEvent.has(opts.eventId)) return fail('That cruise already has a convoy');
@@ -190,6 +235,7 @@ export class Rooms {
       messages: [],
       navigationVersion: 0,
       members: new Map(), removed: new Set(), createdAt: now, emptySince: null,
+      open: opts.open ?? false,
     };
     this.rooms.set(code, room);
     if (room.eventId) this.byEvent.set(room.eventId, code);
@@ -198,7 +244,7 @@ export class Rooms {
   }
 
   /** Joining a room you are already in is a no-op that returns it, so a reconnecting client can just say so again. */
-  join(code: string, who: Who): Outcome {
+  join(code: string, who: Who, opts: { newMember?: boolean } = {}): Outcome {
     const room = this.room(code);
     if (!room) return fail('No convoy has that code');
     if (room.removed.has(who.id)) return fail('The leader removed you from this convoy');
@@ -209,13 +255,13 @@ export class Rooms {
     }
     if (room.members.size >= MAX_MEMBERS) return fail(`That convoy is full (${MAX_MEMBERS} members)`);
     if ((this.byUser.get(who.id)?.size ?? 0) >= MAX_ROOMS_PER_USER) return fail(`You can be in ${MAX_ROOMS_PER_USER} convoys at once: leave one first`);
-    this.add(room, who);
+    this.add(room, who, opts.newMember);
     return { ok: true, value: this.view(code)! };
   }
 
-  private add(room: Room, who: Who): void {
+  private add(room: Room, who: Who, newMember?: boolean): void {
     const now = this.now();
-    room.members.set(who.id, { ...who, online: true, lastSeen: now, lastPositionAt: 0, position: null, joinedAt: now });
+    room.members.set(who.id, { ...who, online: true, lastSeen: now, lastPositionAt: 0, position: null, joinedAt: now, newMember: newMember ?? false });
     room.emptySince = null;
     let mine = this.byUser.get(who.id);
     if (!mine) this.byUser.set(who.id, (mine = new Set()));
@@ -275,6 +321,15 @@ export class Rooms {
     }
     room.separatedSince = null;
     room.regroupPending = false;
+    return { ok: true, value: this.view(code)! };
+  }
+
+  /** Leader-only visibility toggle: switch between open and private convoy. */
+  setOpen(code: string, userId: string, open: boolean): Outcome {
+    const room = this.room(code);
+    if (!room?.members.has(userId)) return fail('You are not in that convoy');
+    if (room.leader !== userId) return fail('Only the leader can change convoy visibility');
+    room.open = open;
     return { ok: true, value: this.view(code)! };
   }
 
@@ -373,20 +428,54 @@ export class Rooms {
    * A position from a member: kept as their latest and returned with the rooms
    * it goes to, or null when it came too soon after the last (throttled).
    */
-  position(userId: string, p: Omit<Position, 'ts'>): { position: Position; codes: string[]; automaticRegroupCodes: string[] } | null {
+  position(userId: string, p: Omit<Position, 'ts'>): { position: Position; codes: string[]; automaticRegroupCodes: string[]; memberStatusChangedCodes: string[]; openCruise: boolean } | null {
     const codes = this.roomsOf(userId);
-    if (codes.length === 0) return null;
+    const isOpenCruise = this.openCruiseUsers.has(userId);
+    if (codes.length === 0 && !isOpenCruise) return null;
     const now = this.now();
-    const first = this.room(codes[0])!.members.get(userId)!;
-    if (now - first.lastPositionAt < POSITION_GAP_MS) return null;
+    const lastPosAt = codes.length > 0
+      ? this.room(codes[0])!.members.get(userId)!.lastPositionAt
+      : (this.openCruiseLastPos.get(userId) ?? 0);
+    if (now - lastPosAt < POSITION_GAP_MS) return null;
     const position: Position = { ...p, ts: now };
+    if (isOpenCruise) {
+      this.openCruiseLastPos.set(userId, now);
+      const u = this.openCruiseUsers.get(userId);
+      if (u) { u.position = position; u.lastSeen = now; }
+    }
+    const memberStatusChangedCodes: string[] = [];
     for (const code of codes) {
-      const m = this.room(code)!.members.get(userId)!;
+      const room = this.room(code)!;
+      const m = room.members.get(userId)!;
       m.position = position;
       m.lastPositionAt = now;
       m.lastSeen = now;
+      if (m.newMember) {
+        const established = [...room.members.values()].filter((o) => o.id !== userId && o.online && o.position && !o.newMember);
+        let reached = false;
+        for (const est of established) {
+          if (haversine(position.lat, position.lng, est.position!.lat, est.position!.lng) <= 500) {
+            reached = true;
+            break;
+          }
+        }
+        if (!reached && established.length > 0) {
+          const c = convoyCentroid(established);
+          if (c && haversine(position.lat, position.lng, c.lat, c.lng) <= 500) reached = true;
+        }
+        if (reached) {
+          m.newMember = false;
+          memberStatusChangedCodes.push(code);
+        }
+      }
     }
-    return { position, codes, automaticRegroupCodes: codes.filter((code) => this.automaticRegroupDue(this.room(code)!, now)) };
+    return {
+      position,
+      codes,
+      automaticRegroupCodes: codes.filter((code) => this.automaticRegroupDue(this.room(code)!, now)),
+      memberStatusChangedCodes,
+      openCruise: isOpenCruise,
+    };
   }
 
   private automaticRegroupDue(room: Room, now: number): boolean {
@@ -394,7 +483,9 @@ export class Rooms {
       room.separatedSince = null;
       return false;
     }
-    const positions = [...room.members.values()].filter((m) => m.online && m.position && now - m.position.ts <= AUTO_REGROUP_FRESH_MS).map((m) => m.position!);
+    const positions = [...room.members.values()]
+      .filter((m) => m.online && m.position && !m.newMember && now - m.position.ts <= AUTO_REGROUP_FRESH_MS)
+      .map((m) => m.position!);
     if (positions.length < 2) { room.separatedSince = null; return false; }
     let widest = 0;
     for (let i = 0; i < positions.length; i++) for (let j = i + 1; j < positions.length; j++) widest = Math.max(widest, haversine(positions[i].lat, positions[i].lng, positions[j].lat, positions[j].lng));
@@ -413,6 +504,7 @@ export class Rooms {
       const m = this.room(code)!.members.get(userId)!;
       if (m.position) { m.position = null; changed.push(code); }
     }
+    this.clearOpenCruisePosition(userId);
     return changed;
   }
 
@@ -430,6 +522,7 @@ export class Rooms {
       this.settle(room);
       changed.push(code);
     }
+    if (!online) this.clearOpenCruisePosition(userId);
     return changed;
   }
 
@@ -437,6 +530,7 @@ export class Rooms {
   removeUser(userId: string): string[] {
     const changed: string[] = [];
     for (const code of this.roomsOf(userId)) if (this.leave(code, userId)) changed.push(code);
+    this.setOpenCruise({ id: userId, username: '', avatar: '' }, false);
     return changed;
   }
 
@@ -447,11 +541,122 @@ export class Rooms {
     else room.emptySince ??= this.now();
   }
 
+  /** Summaries of all open convoys for map visibility. */
+  openConvoys(): OpenConvoySummary[] {
+    const now = this.now();
+    const list: OpenConvoySummary[] = [];
+    for (const room of this.rooms.values()) {
+      if (!room.open) continue;
+      const members = [...room.members.values()];
+      list.push({
+        code: room.code,
+        name: room.name,
+        leader: room.leader,
+        members: members.map((m) => ({ id: m.id, username: m.username, avatar: m.avatar, ...(m.newMember ? { newMember: true } : {}) })),
+        destination: room.destination,
+        cruising: room.cruising,
+        resting: room.resting,
+        centroid: convoyCentroid(members.filter((m) => m.position && now - m.position.ts <= AUTO_REGROUP_FRESH_MS)),
+      });
+    }
+    return list;
+  }
+
+  setOpenCruise(who: Who, enabled: boolean): void {
+    if (enabled) {
+      const existing = this.openCruiseUsers.get(who.id);
+      this.openCruiseUsers.set(who.id, {
+        id: who.id,
+        username: who.username,
+        avatar: who.avatar,
+        position: existing?.position ?? null,
+        lastSeen: this.now(),
+      });
+    } else {
+      this.openCruiseUsers.delete(who.id);
+      this.openCruiseLastPos.delete(who.id);
+    }
+  }
+
+  isOpenCruise(userId: string): boolean { return this.openCruiseUsers.has(userId); }
+
+  getOpenCruiseUsers(): OpenCruiseUser[] {
+    const now = this.now();
+    return [...this.openCruiseUsers.values()].map((user) => ({
+      ...user,
+      position: user.position && now - user.position.ts <= AUTO_REGROUP_FRESH_MS ? user.position : null,
+    }));
+  }
+
+  getOpenCruiseUser(userId: string): OpenCruiseUser | undefined {
+    return this.getOpenCruiseUsers().find((user) => user.id === userId);
+  }
+
+  clearOpenCruisePosition(userId: string): void {
+    const u = this.openCruiseUsers.get(userId);
+    if (u) u.position = null;
+  }
+
+  createOpenConvoyInvite(from: Who, toUserId: string): Outcome<OpenConvoyInvite> {
+    if (from.id === toUserId) return fail('You cannot invite yourself');
+    const eligible = this.openCruisePairEligible(from.id, toUserId);
+    if (!eligible.ok) return eligible;
+    const invite: OpenConvoyInvite = { from, toUserId, createdAt: this.now() };
+    this.openConvoyInvites.set(`${from.id}:${toUserId}`, invite);
+    return { ok: true, value: invite };
+  }
+
+  acceptOpenConvoyInvite(fromUserId: string, toWho: Who): Outcome<RoomView> {
+    const key = `${fromUserId}:${toWho.id}`;
+    const invite = this.openConvoyInvites.get(key);
+    if (!invite || this.now() - invite.createdAt > 60_000) return fail('That invitation has expired');
+    const eligible = this.openCruisePairEligible(fromUserId, toWho.id);
+    if (!eligible.ok) return eligible;
+    this.openConvoyInvites.delete(key);
+    // User who initiated the match is leader:
+    const made = this.create(invite.from, { name: `${invite.from.username}'s Open Convoy`, open: true });
+    if (!made.ok) return made;
+    const joined = this.join(made.value.code, toWho);
+    if (!joined.ok) return joined;
+    return { ok: true, value: this.view(made.value.code)! };
+  }
+
+  declineOpenConvoyInvite(fromUserId: string, toUserId: string): boolean {
+    return this.openConvoyInvites.delete(`${fromUserId}:${toUserId}`);
+  }
+
+  private openCruisePairEligible(fromUserId: string, toUserId: string): Outcome<true> {
+    const from = this.getOpenCruiseUser(fromUserId);
+    const to = this.getOpenCruiseUser(toUserId);
+    if (!from || !to) return fail('Both drivers must have Open Cruise enabled');
+    if (!from.position || !to.position) return fail('Both drivers need a fresh location to create an Open Convoy');
+    if (haversine(from.position.lat, from.position.lng, to.position.lat, to.position.lng) > OPEN_CRUISE_MATCH_DISTANCE_M) {
+      return fail('That driver is no longer within 500m');
+    }
+    return { ok: true, value: true };
+  }
+
+  joinOpenConvoy(code: string, who: Who): Outcome<RoomView> {
+    const room = this.room(code);
+    if (!room) return fail('No convoy has that code');
+    if (!room.open) return fail('That convoy is not an open convoy');
+    return this.join(code, who, { newMember: true });
+  }
+
   /** Retire members who have been gone too long and rooms nobody has been in. Returns the rooms that changed and the codes that went. */
   sweep(): { changed: string[]; gone: string[] } {
     const now = this.now();
     const changed: string[] = [];
     const gone: string[] = [];
+    for (const [key, invite] of this.openConvoyInvites) {
+      if (now - invite.createdAt > 60_000) this.openConvoyInvites.delete(key);
+    }
+    for (const [id, user] of this.openCruiseUsers) {
+      if (now - user.lastSeen >= MEMBER_GRACE_MS) {
+        this.openCruiseUsers.delete(id);
+        this.openCruiseLastPos.delete(id);
+      }
+    }
     for (const room of [...this.rooms.values()]) {
       room.messages = room.messages.filter((m) => now - m.ts < CONVOY_MESSAGE_TTL_MS);
       for (const m of [...room.members.values()]) {

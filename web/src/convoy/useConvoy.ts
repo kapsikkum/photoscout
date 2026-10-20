@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { realtime, type Status } from './client.js';
 import { activeRoom, emptyState, reduce, viewOf, type ConvoyState, type ConvoyView } from './state.js';
-import type { AutomaticRegroup, ConvoyRoute, Destination, Position, Room } from './types.js';
+import type { AutomaticRegroup, ConvoyRoute, Destination, OpenConvoySummary, OpenCruiseUser, Position, Room } from './types.js';
 import { convoyEvents, type ConvoyNotice } from './events.js';
 
 /**
  * The convoy for any page: connect, reconnect, say where you are while you are
- * in a room, hear where the others are. Several components can call
+ * in a room or in Open Cruise mode, hear where the others are. Several components can call
  * `useConvoy()` at once (the Convoy page, a Drive page with a convoy on its
  * map) and share one connection, one room list and one location watch.
  *
- * Your position goes out at most once a second, only while you are in a room
- * and have sharing on, and stops the moment you leave or the socket drops.
+ * Your position goes out at most once a second, only while you are in a room or
+ * have Open Cruise enabled and have sharing on, and stops the moment you leave or the socket drops.
  */
 
 const SEND_GAP_MS = 1000;
@@ -26,6 +26,7 @@ interface Snapshot {
   status: Status;
   state: ConvoyState;
   sharing: boolean;
+  openCruise: boolean;
   mine: Position | null;
   geoError: string;
 }
@@ -35,8 +36,26 @@ function readSharing(): boolean {
   try { return localStorage.getItem(SHARING_KEY) !== 'off'; } catch { return true; }
 }
 
+const OPEN_CRUISE_KEY = 'photoscout.convoy.openCruise';
+function readOpenCruise(): boolean {
+  try { return localStorage.getItem(OPEN_CRUISE_KEY) === 'on'; } catch { return false; }
+}
+
 function preference(key: string): boolean { try { return localStorage.getItem(`photoscout.convoy.${key}`) === 'on'; } catch { return false; } }
-let snap: Snapshot = { notices: [], unread: {}, readMessages: preference('readMessages'), announceEvents: preference('announceEvents'), desktopAlerts: preference('desktopAlerts'), keepAwake: preference('keepAwake'), status: realtime.status, state: emptyState, sharing: readSharing(), mine: null, geoError: '' };
+let snap: Snapshot = {
+  notices: [],
+  unread: {},
+  readMessages: preference('readMessages'),
+  announceEvents: preference('announceEvents'),
+  desktopAlerts: preference('desktopAlerts'),
+  keepAwake: preference('keepAwake'),
+  status: realtime.status,
+  state: emptyState,
+  sharing: readSharing(),
+  openCruise: readOpenCruise(),
+  mine: null,
+  geoError: '',
+};
 const listeners = new Set<() => void>();
 let users = 0;
 let release: (() => void) | null = null;
@@ -51,14 +70,17 @@ function set(patch: Partial<Snapshot>): void {
   for (const fn of [...listeners]) fn();
 }
 
-/** Watch the phone's location exactly while it is wanted: in a room, sharing on, socket open. */
+/** Watch the phone's location exactly while it is wanted: in a room or in Open Cruise, sharing on, socket open. */
 function syncWatch(): void {
-  const want = users > 0 && snap.sharing && snap.status === 'open' && snap.state.rooms.length > 0 && typeof navigator !== 'undefined' && 'geolocation' in navigator;
+  const want = users > 0 && snap.sharing && snap.status === 'open' && (snap.state.rooms.length > 0 || snap.openCruise) && typeof navigator !== 'undefined' && 'geolocation' in navigator;
+  const native = (window as Window & { PhotoScoutNative?: { startBackgroundLocation?: () => void; stopBackgroundLocation?: () => void } }).PhotoScoutNative;
   if (want && watchId === null) {
     watchId = navigator.geolocation.watchPosition(onFix, onFixError, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20_000 });
+    native?.startBackgroundLocation?.();
   } else if (!want && watchId !== null) {
     navigator.geolocation.clearWatch(watchId);
     watchId = null;
+    native?.stopBackgroundLocation?.();
     realtime.send({ t: 'pos.stop' }); // so the others are not left looking at where you last were
     if (snap.mine) snap = { ...snap, mine: null }; // not shared any more, so not drawn as shared
   }
@@ -83,6 +105,9 @@ function start(): void {
   unhook = [
     realtime.onStatus((status) => {
       if (status === 'ended') { set({ status, state: emptyState, notices: [], unread: {}, mine: null }); return; }
+      if (status === 'open' && snap.openCruise) {
+        realtime.send({ t: 'open_cruise.toggle', enabled: true });
+      }
       set({ status });
     }),
     realtime.onMessage((m) => {
@@ -102,6 +127,9 @@ function start(): void {
   ];
   release = realtime.acquire();
   snap = { ...snap, status: realtime.status };
+  if (realtime.status === 'open' && snap.openCruise) {
+    realtime.send({ t: 'open_cruise.toggle', enabled: true });
+  }
 }
 
 function stop(): void {
@@ -142,13 +170,26 @@ export interface Convoy {
   sharing: boolean;
   geoError: string;
   setSharing(on: boolean): void;
+  openCruise: boolean;
+  setOpenCruise(on: boolean): void;
+  openCruiseUsers: OpenCruiseUser[];
+  openConvoys: OpenConvoySummary[];
+  incomingInvite: { from: { id: string; username: string; avatar: string }; ts: number } | null;
+  declinedNotice: { from: { id: string; username: string }; ts: number } | null;
+  sendOpenConvoyInvite(targetUserId: string): void;
+  acceptOpenConvoyInvite(fromUserId: string): void;
+  declineOpenConvoyInvite(fromUserId: string): void;
+  joinOpenConvoy(code: string): void;
+  dismissInvite(): void;
+  dismissDeclinedNotice(): void;
   setActive(code: string): void;
-  create(name: string, automaticRegroup: AutomaticRegroup): void;
+  create(name: string, automaticRegroup: AutomaticRegroup, open?: boolean): void;
   join(code: string): void;
   joinCruise(eventId: string): void;
   leave(code?: string): void;
   setDestination(destination: Destination | null): void;
   setCruising(cruising: boolean): void;
+  setOpen(open: boolean, code?: string): void;
   rest(action: 'find' | 'continue'): void;
   setRoute(route: ConvoyRoute | null): void;
   handOver(to: string): void;
@@ -202,13 +243,36 @@ export function useConvoy(enabled = true): Convoy {
       try { localStorage.setItem(SHARING_KEY, on ? 'on' : 'off'); } catch { /* private mode: it just will not be remembered */ }
       set({ sharing: on });
     },
+    openCruise: s.openCruise,
+    setOpenCruise: (on) => {
+      try { localStorage.setItem(OPEN_CRUISE_KEY, on ? 'on' : 'off'); } catch { /* private mode */ }
+      set({ openCruise: on });
+      if (snap.status === 'open') realtime.send({ t: 'open_cruise.toggle', enabled: on });
+    },
+    openCruiseUsers: s.state.openCruiseUsers,
+    openConvoys: s.state.openConvoys,
+    incomingInvite: s.state.incomingInvite,
+    declinedNotice: s.state.declinedNotice,
+    sendOpenConvoyInvite: (targetUserId) => send({ t: 'open_convoy.invite', targetUserId }),
+    acceptOpenConvoyInvite: (fromUserId) => {
+      set({ state: { ...snap.state, incomingInvite: null } });
+      send({ t: 'open_convoy.accept', fromUserId });
+    },
+    declineOpenConvoyInvite: (fromUserId) => {
+      set({ state: { ...snap.state, incomingInvite: null } });
+      send({ t: 'open_convoy.decline', fromUserId });
+    },
+    joinOpenConvoy: (code) => send({ t: 'open_convoy.join', code }),
+    dismissInvite: () => set({ state: { ...snap.state, incomingInvite: null } }),
+    dismissDeclinedNotice: () => set({ state: { ...snap.state, declinedNotice: null } }),
     setActive: (code) => set({ state: { ...snap.state, active: code } }),
-    create: (name, automaticRegroup) => send({ t: 'convoy.create', name, automaticRegroup }),
+    create: (name, automaticRegroup, open) => send({ t: 'convoy.create', name, automaticRegroup, open }),
     join: (code) => send({ t: 'convoy.join', code }),
     joinCruise: (eventId) => send({ t: 'convoy.cruise', eventId }),
     leave: (code) => { const c = code ?? room?.code; if (c) send({ t: 'convoy.leave', room: c }); },
     setDestination: (destination) => { if (room) send({ t: 'convoy.dest', room: room.code, destination }); },
     setCruising: (cruising) => { if (room) send({ t: 'convoy.mode', room: room.code, cruising }); },
+    setOpen: (open, code) => { const c = code ?? room?.code; if (c) send({ t: 'convoy.open', room: c, open }); },
     rest: (action) => { if (room) send({ t: 'convoy.rest', room: room.code, action }); },
     setRoute: (route) => { if (room) send({ t: 'convoy.route', room: room.code, route: route && { ...route, name: route.name.slice(0, 40) } }); },
     handOver: (to) => { if (room) send({ t: 'convoy.lead', room: room.code, to }); },

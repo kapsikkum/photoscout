@@ -68,11 +68,21 @@ const sendUser = (userId: string, message: unknown): void => {
   for (const conn of byUser.get(userId) ?? []) send(conn, message);
 };
 
+function broadcastOpenCruise(message: unknown, excludeUserId?: string): void {
+  for (const u of rooms.getOpenCruiseUsers()) {
+    if (excludeUserId && u.id === excludeUserId) continue;
+    sendUser(u.id, message);
+  }
+}
+
 /** The room as every member should now see it. */
 function announce(code: string): void {
   const view = rooms.view(code);
   if (!view) return;
   for (const id of rooms.memberIds(code)) sendUser(id, { t: 'room', room: view });
+  if (view.open) {
+    broadcastOpenCruise({ t: 'open_cruise.convoys', convoys: rooms.openConvoys() });
+  }
 }
 
 /** A sustained split queued by Rooms: look up one advisory stop and apply it only if it is still pending. */
@@ -131,30 +141,115 @@ function handle(conn: Conn, m: ClientMessage): void {
     case 'chat.unsub':
       conn.chat = false;
       return;
+    case 'open_cruise.toggle': {
+      const who = whoIs(conn.userId);
+      if (!who) return close(conn, CLOSE_SESSION_ENDED, 'Session ended');
+      rooms.setOpenCruise(who, m.enabled);
+      if (m.enabled) {
+        send(conn, {
+          t: 'open_cruise.state',
+          enabled: true,
+          users: rooms.getOpenCruiseUsers().filter((u) => u.id !== conn.userId),
+          convoys: rooms.openConvoys(),
+        });
+        broadcastOpenCruise({ t: 'open_cruise.user_joined', user: rooms.getOpenCruiseUser(conn.userId)! }, conn.userId);
+      } else {
+        broadcastOpenCruise({ t: 'open_cruise.user_left', id: conn.userId }, conn.userId);
+        send(conn, { t: 'open_cruise.state', enabled: false, users: [], convoys: [] });
+      }
+      return;
+    }
+    case 'open_convoy.invite': {
+      const who = whoIs(conn.userId);
+      if (!who) return close(conn, CLOSE_SESSION_ENDED, 'Session ended');
+      const target = whoIs(m.targetUserId);
+      if (!target || !rooms.isOpenCruise(target.id)) return error('Driver is not available for Open Convoy');
+      const invite = rooms.createOpenConvoyInvite(who, m.targetUserId);
+      if (!invite.ok) return error(invite.error);
+      sendUser(m.targetUserId, { t: 'open_convoy.invited', from: who });
+      return;
+    }
+    case 'open_convoy.accept': {
+      const who = whoIs(conn.userId);
+      if (!who) return close(conn, CLOSE_SESSION_ENDED, 'Session ended');
+      const done = rooms.acceptOpenConvoyInvite(m.fromUserId, who);
+      if (!done.ok) return error(done.error);
+      announce(done.value.code);
+      broadcastOpenCruise({ t: 'open_cruise.convoys', convoys: rooms.openConvoys() });
+      return;
+    }
+    case 'open_convoy.decline': {
+      rooms.declineOpenConvoyInvite(m.fromUserId, conn.userId);
+      const who = whoIs(conn.userId);
+      if (who) sendUser(m.fromUserId, { t: 'open_convoy.declined', from: who });
+      return;
+    }
+    case 'open_convoy.join': {
+      const who = whoIs(conn.userId);
+      if (!who) return close(conn, CLOSE_SESSION_ENDED, 'Session ended');
+      const done = rooms.joinOpenConvoy(m.code, who);
+      if (!done.ok) return error(done.error);
+      announce(done.value.code);
+      broadcastOpenCruise({ t: 'open_cruise.convoys', convoys: rooms.openConvoys() });
+      return;
+    }
     case 'pos.stop':
       for (const code of rooms.clearPosition(conn.userId)) announce(code);
+      if (rooms.isOpenCruise(conn.userId)) {
+        broadcastOpenCruise({ t: 'open_cruise.pos_stop', id: conn.userId }, conn.userId);
+      }
       return;
     case 'pos': {
       const out = rooms.position(conn.userId, { lat: m.lat, lng: m.lng, heading: m.heading, speed: m.speed });
-      if (!out) return; // not in a room, or too soon after the last: dropped without a word
+      if (!out) return; // not in a room and not open cruise, or throttled
       for (const code of out.codes) {
         const packet = { t: 'pos', room: code, id: conn.userId, ...out.position };
         for (const id of rooms.memberIds(code)) if (id !== conn.userId) sendUser(id, packet);
       }
+      if (out.openCruise) {
+        const user = rooms.getOpenCruiseUser(conn.userId);
+        if (user) {
+          broadcastOpenCruise({ t: 'open_cruise.pos', user }, conn.userId);
+        }
+        if (out.codes.some((code) => rooms.view(code)?.open)) {
+          broadcastOpenCruise({ t: 'open_cruise.convoys', convoys: rooms.openConvoys() });
+        }
+      }
+      for (const code of out.memberStatusChangedCodes) announce(code);
       for (const code of out.automaticRegroupCodes) automaticRegroup(code);
       return;
     }
     case 'convoy.leave': {
       if (!rooms.roomsOf(conn.userId).includes(m.room)) return error('You are not in that convoy');
+      const wasOpen = rooms.view(m.room)?.open;
       rooms.leave(m.room, conn.userId);
       sendUser(conn.userId, { t: 'left', room: m.room });
-      return announce(m.room);
+      announce(m.room);
+      if (wasOpen) {
+        broadcastOpenCruise({ t: 'open_cruise.convoys', convoys: rooms.openConvoys() });
+      }
+      return;
     }
     case 'convoy.remove': {
+      const wasOpen = rooms.view(m.room)?.open;
       const done = rooms.remove(m.room, conn.userId, m.id);
       if (!done.ok) return error(done.error);
       sendUser(m.id, { t: 'left', room: m.room, removed: true });
-      return announce(m.room);
+      announce(m.room);
+      if (wasOpen) {
+        broadcastOpenCruise({ t: 'open_cruise.convoys', convoys: rooms.openConvoys() });
+      }
+      return;
+    }
+    case 'convoy.open': {
+      const wasOpen = rooms.view(m.room)?.open;
+      const done = rooms.setOpen(m.room, conn.userId, m.open);
+      if (!done.ok) return error(done.error);
+      announce(m.room);
+      if (wasOpen || m.open) {
+        broadcastOpenCruise({ t: 'open_cruise.convoys', convoys: rooms.openConvoys() });
+      }
+      return;
     }
     case 'convoy.dest':
     case 'convoy.route':
@@ -198,7 +293,7 @@ function handle(conn: Conn, m: ClientMessage): void {
       if (!who) return close(conn, CLOSE_SESSION_ENDED, 'Session ended');
       let done;
       if (m.t === 'convoy.create') {
-        done = rooms.create(who, { name: m.name, automaticRegroup: m.automaticRegroup });
+        done = rooms.create(who, { name: m.name, automaticRegroup: m.automaticRegroup, open: m.open });
       } else if (m.t === 'convoy.join') {
         if (misses.blocked(conn.userId)) return error('Too many wrong codes. Try again in a few minutes.');
         done = rooms.join(m.code, who);
@@ -281,6 +376,10 @@ export function attachRealtime(server: http.Server, opts: RealtimeOptions = {}):
       if (mine!.size === 0) {
         byUser.delete(userId);
         for (const code of rooms.setOnline(userId, false)) announce(code);
+        if (rooms.isOpenCruise(userId)) {
+          rooms.setOpenCruise({ id: userId, username: '', avatar: '' }, false);
+          broadcastOpenCruise({ t: 'open_cruise.user_left', id: userId });
+        }
       }
     });
 
@@ -310,6 +409,7 @@ export function attachRealtime(server: http.Server, opts: RealtimeOptions = {}):
     const { changed } = rooms.sweep();
     for (const code of changed) announce(code);
     misses.sweep();
+    broadcastOpenCruise({ t: 'open_cruise.convoys', convoys: rooms.openConvoys() });
   }, opts.sweepMs ?? 30_000);
   beat.unref();
   sweepTimer.unref();

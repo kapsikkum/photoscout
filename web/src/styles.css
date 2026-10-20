@@ -2370,3 +2370,460 @@ svg.drive__report-icon { display: inline-block; width: 1.3em; height: 1.3em; ver
   .invite__share { flex-wrap: wrap; }
   .invite__share button { flex: 1 0 100%; }
 }
+
+/* ==== Open Cruise & Open Convoy ==== */
+.open-cruise-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #00d2ff;
+  box-shadow: 0 0 8px #00d2ff;
+  margin-right: 6px;
+  animation: pulse-dot 2s infinite ease-in-out;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+.open-convoy-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--pill);
+  background: rgba(0, 210, 255, 0.15);
+  color: #00d2ff;
+  border: 1px solid rgba(0, 210, 255, 0.4);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.open-convoy-badge--live {
+  background: rgba(0, 230, 118, 0.15);
+  color: #00e676;
+  border-color: rgba(0, 230, 118, 0.4);
+}
+.open-convoy-badge--private {  background: rgba(255, 255, 255, 0.08);  color: var(--text-muted);  border-color: rgba(255, 255, 255, 0.2);}
+
+.catching-up-pill {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: var(--pill);
+  background: rgba(255, 171, 0, 0.2);
+  color: #ffab00;
+  border: 1px solid rgba(255, 171, 0, 0.4);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.leader-pill {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: var(--pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.open-cruise-card__action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.open-cruise-card__status {
+  font-size: 13px;
+  color: #00d2ff;
+  font-weight: 500;
+}
+
+/* Floating Banners (Invites & Proximity) */
+.open-convoy-banner {
+  position: fixed;
+  top: calc(var(--topbar-h) + 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  width: min(520px, calc(100vw - 24px));
+  padding: 12px 16px;
+  background: rgba(14, 18, 28, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: var(--radius);
+  border: 1px solid rgba(0, 210, 255, 0.4);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 210, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  animation: slide-in-top 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes slide-in-top {
+  from { opacity: 0; transform: translate(-50%, -20px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.open-convoy-banner--invite {
+  border-color: rgba(0, 210, 255, 0.6);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7), 0 0 24px rgba(0, 210, 255, 0.3);
+}
+.open-convoy-banner--proximity {
+  border-color: rgba(0, 230, 118, 0.5);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 230, 118, 0.2);
+}
+.open-convoy-banner--declined {
+  border-color: rgba(255, 82, 82, 0.4);
+}
+
+.open-convoy-banner__info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.open-convoy-banner__text {
+  margin: 0;
+  font-size: 14.5px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.open-convoy-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.open-convoy-banner__actions button {
+  min-height: 38px;
+  padding: 6px 14px;
+  font-size: 13.5px;
+}
+.open-convoy-banner__pending {
+  font-size: 13px;
+  color: #00d2ff;
+  font-style: italic;
+}
+
+/* Open Convoy Modal */
+.open-convoy-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fade-in 0.2s ease-out;
+}
+.open-convoy-modal {
+  width: min(460px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: zoom-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes zoom-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+.open-convoy-modal__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.open-convoy-modal__head h2 {
+  margin: 4px 0 0;
+  font-size: 19px;
+}
+.open-convoy-modal__status p {
+  margin: 0;
+  font-size: 14px;
+}
+.open-convoy-modal__members h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.open-convoy-modal__members .member-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.open-convoy-modal__members .member-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--panel-2);
+}
+.open-convoy-modal__footer button {
+  width: 100%;
+  min-height: 44px;
+}
+
+/* Map Markers */
+.open-cruise-pin {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #00d2ff;
+  border: 3px solid #ffffff;
+  box-shadow: 0 0 10px rgba(0, 210, 255, 0.8), 0 2px 6px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  position: relative;
+}
+.open-cruise-pin.is-nearby {
+  background: #00e676;
+  box-shadow: 0 0 16px rgba(0, 230, 118, 0.9), 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+.open-cruise-pin__label {
+  position: absolute;
+  left: 50%;
+  top: 22px;
+  transform: translateX(-50%);
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #ffffff;
+  background: rgba(5, 7, 15, 0.85);
+  border: 1px solid rgba(0, 210, 255, 0.4);
+  border-radius: var(--pill);
+  pointer-events: none;
+}
+.open-cruise-pin.is-nearby .open-cruise-pin__pulse {
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  border: 2px solid #00e676;
+  animation: pulse-ring 1.8s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+@keyframes pulse-ring {
+  0% { transform: scale(0.5); opacity: 0; }
+  50% { opacity: 0.8; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+.open-convoy-marker {
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform: translate(-50%, -50%);
+}
+.open-convoy-marker__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: var(--pill);
+  background: linear-gradient(135deg, #00d2ff 0%, #0072ff 100%);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  border: 2px solid #ffffff;
+  box-shadow: 0 4px 14px rgba(0, 114, 255, 0.6), 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: transform 0.15s ease;
+}
+.open-convoy-marker:hover .open-convoy-marker__badge {
+  transform: scale(1.1);
+}
+.open-convoy-marker__label {
+  margin-top: 4px;
+  padding: 1px 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #ffffff;
+  background: rgba(5, 7, 15, 0.85);
+  border-radius: var(--pill);
+}
+
+.driveconvoy__name.is-open-cruise {
+  border-color: rgba(0, 210, 255, 0.5);
+  background: rgba(0, 210, 255, 0.12);
+}
+.driveconvoy--dormant .driveconvoy__name--toggle {
+  opacity: 0.85;
+  font-size: 13.5px;
+}
+.driveconvoy--dormant .driveconvoy__name--toggle:hover {
+  opacity: 1;
+}
+.open-cruise-toggle-btn.is-active {
+  background: rgba(0, 210, 255, 0.2);
+  border-color: rgba(0, 210, 255, 0.6);
+  color: #00d2ff;
+}
+
+/* Open Cruise Small Cruise UI Dock (Map Overlay) */
+.open-cruise-dock {
+  /* Inherits .convoy-dock and .convoy-dock--map */
+}
+.open-cruise-dock--stacked {
+  top: calc(var(--topbar-h) + 60px);
+}
+@media (max-width: 640px) {
+  .open-cruise-dock--stacked {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 144px);
+    top: auto;
+  }
+}
+.open-cruise-dock__toggle-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.open-cruise-dock__toggle-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.open-cruise-dock__close-btn {
+  background: none;
+  border: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--pill);
+  line-height: 1;
+  transition: color 0.15s, background 0.15s;
+}
+.open-cruise-dock__close-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+}
+.open-cruise-dock__toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.open-cruise-dock__toggle-label {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.open-cruise-dock__toggle-hint {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.open-cruise-dock__switch {
+  min-width: 58px;
+  padding: 4px 12px;
+  font-size: 12px;
+  border-radius: var(--pill);
+}
+.open-cruise-dock__desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 4px 0 10px;
+  line-height: 1.4;
+}
+.open-cruise-dock__match-box {
+  background: rgba(0, 210, 255, 0.08);
+  border: 1px solid rgba(0, 210, 255, 0.3);
+  border-radius: var(--radius);
+  padding: 10px;
+  margin-bottom: 10px;
+}
+.open-cruise-dock__match-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.open-cruise-dock__match-dist {
+  font-size: 11.5px;
+  color: #00d2ff;
+  font-weight: 600;
+}
+.open-cruise-dock__match-user {
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.open-cruise-dock__convoys-section {
+  margin: 10px 0;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.open-cruise-dock__section-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.open-cruise-dock__convoys-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.open-cruise-dock__convoy-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.open-cruise-dock__convoy-meta {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+}
+.open-cruise-dock__convoy-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.open-cruise-dock__actions {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.open-cruise-dock__off-state {
+  padding: 6px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.small-btn {
+  padding: 3px 10px;
+  font-size: 12px;
+  min-height: 28px;
+}

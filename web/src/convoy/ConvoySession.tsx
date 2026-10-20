@@ -5,9 +5,12 @@ import { useTick, useWakeLock } from '../drive/hooks.js';
 import { readConvoy, stopConvoyAudio } from '../drive/audio.js';
 import { realtime } from './client.js';
 import { attachConvoyLayer } from './layer.js';
+import { attachOpenCruiseLayer } from './openCruiseLayer.js';
 import ConvoyChat, { ConvoyAudio } from './ConvoyChat.js';
 import { useConvoy } from './useConvoy.js';
 import { showConvoyNotification } from './notifications.js';
+import { OpenCruiseOverlays } from './OpenCruiseOverlays.js';
+import type { OpenConvoySummary } from './types.js';
 
 export function ConvoyNav() {
   const convoy = useConvoy();
@@ -70,17 +73,34 @@ export default function ConvoySession() {
         <button aria-label="Dismiss convoy notification" onClick={() => convoy.dismissNotice(notice.id)}>×</button>
       </div>)}
     </div>
+    {/* Global Open Cruise Banners (matching, invites, decline notices) */}
+    {pathname !== '/drive' && pathname !== '/' && <OpenCruiseOverlays />}
     {convoy.status === 'ended' && <div className="convoy-session-error" role="alert">Convoy disconnected: your session ended. <a href="/login">Sign in again</a></div>}
     {convoy.room && !['/convoy', '/drive'].includes(pathname) && <aside className={`convoy-dock${pathname === '/' ? ' convoy-dock--map' : ''}${expanded ? ' is-expanded' : ''}`} aria-label="Active convoy">
       <button className="convoy-dock__toggle" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
-        <span>Convoy · <strong>{convoy.room.name}</strong></span>
+        <span>
+          Convoy · <strong>{convoy.room.name}</strong>
+          {convoy.room.open && <span className="open-convoy-badge" style={{ marginLeft: 6 }}>Open</span>}
+        </span>
         <span>{unread > 0 && <b className="convoy-unread">{unread}</b>} {expanded ? '▴' : '▾'}</span>
       </button>
       <ConvoyConnection />
       {expanded && <div className="convoy-dock__body">
         {convoy.rooms.length > 1 && <label>Active convoy <select value={convoy.room.code} onChange={(e) => convoy.setActive(e.target.value)}>{convoy.rooms.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}</select></label>}
         {convoy.room.destination && <p>{convoy.room.resting ? 'Rest stop' : 'Destination'}: {convoy.room.destination.label || 'Map destination'}</p>}
-        <div className="eventcard__actions"><Link className="button" to="/convoy">Manage convoy</Link><Link className="button primary" to="/drive">Open navigation</Link></div>
+        <div className="eventcard__actions">
+          <Link className="button" to="/convoy">Manage convoy</Link>
+          <Link className="button primary" to="/drive">Open navigation</Link>
+          {convoy.room.leader === convoy.me && (
+            <button
+              type="button"
+              className="button"
+              onClick={() => convoy.setOpen(!convoy.room!.open)}
+            >
+              {convoy.room.open ? 'Make Private' : 'Make Open'}
+            </button>
+          )}
+        </div>
         <ConvoyChat key={convoy.room.code} compact />
         <details><summary>Riding &amp; audio</summary><ConvoyAudio /></details>
         {convoy.geoError && convoy.sharing && <p className="error" role="status">{convoy.geoError}</p>}
@@ -90,20 +110,70 @@ export default function ConvoySession() {
   </>;
 }
 
-/** The same members and destination on the main map, including stale-location repainting. */
-export function MapConvoy({ map }: { map: MlMap | null }) {
+/** The same members and destination on the main map, including stale-location repainting and Open Cruise layer. */
+export function MapConvoy({
+  map,
+  selectedOpenConvoy,
+  onCloseSelectedOpenConvoy,
+}: {
+  map: MlMap | null;
+  selectedOpenConvoy?: OpenConvoySummary | null;
+  onCloseSelectedOpenConvoy?: () => void;
+}) {
   const convoy = useConvoy();
   const view = convoy.view;
   const now = useTick(5000);
+  const [internalSelectedConvoy, setInternalSelectedConvoy] = useState<OpenConvoySummary | null>(null);
+
+  const activeSelectedConvoy = selectedOpenConvoy !== undefined ? selectedOpenConvoy : internalSelectedConvoy;
+
   // A single layer per map, with an independent update lifecycle.
   const layer = useRef<ReturnType<typeof attachConvoyLayer> | null>(null);
+  const openLayer = useRef<ReturnType<typeof attachOpenCruiseLayer> | null>(null);
+
   useEffect(() => {
     if (!map) return;
     layer.current = attachConvoyLayer(map);
-    return () => { layer.current?.remove(); layer.current = null; };
+    openLayer.current = attachOpenCruiseLayer(map, [], [], {
+      myId: convoy.me,
+      myPosition: convoy.position,
+      onSelectConvoy: (c) => setInternalSelectedConvoy(c),
+    });
+    return () => {
+      layer.current?.remove();
+      layer.current = null;
+      openLayer.current?.remove();
+      openLayer.current = null;
+    };
   }, [map]);
+
   useEffect(() => {
     layer.current?.update(view?.members ?? [], view ? { me: view.me, leader: view.leader, destination: view.destination } : { destination: null });
   }, [map, view, now]);
-  return null;
+
+  useEffect(() => {
+    if (!convoy.openCruise) {
+      openLayer.current?.update([], []);
+      return;
+    }
+    openLayer.current?.update(convoy.openCruiseUsers, convoy.openConvoys, {
+      myId: convoy.me,
+      myPosition: convoy.position,
+      onSelectConvoy: (c) => setInternalSelectedConvoy(c),
+    });
+  }, [map, convoy.openCruise, convoy.openCruiseUsers, convoy.openConvoys, convoy.position, convoy.me, now]);
+
+  const handleClose = () => {
+    setInternalSelectedConvoy(null);
+    onCloseSelectedOpenConvoy?.();
+  };
+
+  return (
+    <>
+      <OpenCruiseOverlays
+        selectedConvoy={activeSelectedConvoy}
+        onCloseSelectedConvoy={handleClose}
+      />
+    </>
+  );
 }

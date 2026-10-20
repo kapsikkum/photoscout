@@ -15,12 +15,18 @@ export type ClientMessage =
   | { t: 'convoy.message'; room: string; text: string; clientId: string }
   | { t: 'chat.sub' }
   | { t: 'chat.unsub' }
-  | { t: 'convoy.create'; name: string; automaticRegroup: { enabled: boolean; separationM: number } }
+  | { t: 'open_cruise.toggle'; enabled: boolean }
+  | { t: 'open_convoy.invite'; targetUserId: string }
+  | { t: 'open_convoy.accept'; fromUserId: string }
+  | { t: 'open_convoy.decline'; fromUserId: string }
+  | { t: 'open_convoy.join'; code: string }
+  | { t: 'convoy.create'; name: string; automaticRegroup: { enabled: boolean; separationM: number }; open?: boolean }
   | { t: 'convoy.join'; code: string }
   | { t: 'convoy.cruise'; eventId: string }
   | { t: 'convoy.leave'; room: string }
   | { t: 'convoy.dest'; room: string; destination: { lat: number; lng: number; label: string } | null }
   | { t: 'convoy.mode'; room: string; cruising: boolean }
+  | { t: 'convoy.open'; room: string; open: boolean }
   | { t: 'convoy.rest'; room: string; action: 'find' | 'continue' }
   | { t: 'convoy.route'; room: string; route: { name: string; stops: [number, number][] } | null }
   | { t: 'convoy.lead'; room: string; to: string }
@@ -91,8 +97,25 @@ export function parseClientMessage(raw: string): ParsedMessage {
       case 'chat.unsub':
       case 'pos.stop':
         return { ok: true, message: { t: o.t } };
-      case 'convoy.create':
-        return { ok: true, message: { t: o.t, name: str(o, 'name', MAX_NAME), automaticRegroup: automaticRegroup(o.automaticRegroup) } };
+      case 'open_cruise.toggle':
+        if (typeof o.enabled !== 'boolean') return bad('enabled must be true or false');
+        return { ok: true, message: { t: o.t, enabled: o.enabled } };
+      case 'open_convoy.invite':
+        return { ok: true, message: { t: o.t, targetUserId: id(o, 'targetUserId') } };
+      case 'open_convoy.accept':
+        return { ok: true, message: { t: o.t, fromUserId: id(o, 'fromUserId') } };
+      case 'open_convoy.decline':
+        return { ok: true, message: { t: o.t, fromUserId: id(o, 'fromUserId') } };
+      case 'open_convoy.join': {
+        const code = normalizeCode(str(o, 'code', 32, true));
+        if (!CODE_PATTERN.test(code)) return bad('That is not a convoy code');
+        return { ok: true, message: { t: o.t, code } };
+      }
+      case 'convoy.create': {
+        const msg: ClientMessage = { t: o.t, name: str(o, 'name', MAX_NAME), automaticRegroup: automaticRegroup(o.automaticRegroup) };
+        if (typeof o.open === 'boolean') msg.open = o.open;
+        return { ok: true, message: msg };
+      }
       case 'convoy.join': {
         const code = normalizeCode(str(o, 'code', 32, true));
         if (!CODE_PATTERN.test(code)) return bad('That is not a convoy code');
@@ -113,6 +136,10 @@ export function parseClientMessage(raw: string): ParsedMessage {
       case 'convoy.mode': {
         if (typeof o.cruising !== 'boolean') return bad('cruising must be true or false');
         return { ok: true, message: { t: o.t, room: id(o, 'room'), cruising: o.cruising } };
+      }
+      case 'convoy.open': {
+        if (typeof o.open !== 'boolean') return bad('open must be true or false');
+        return { ok: true, message: { t: o.t, room: id(o, 'room'), open: o.open } };
       }
       case 'convoy.rest': {
         const action = o.action;
