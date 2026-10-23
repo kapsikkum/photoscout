@@ -1,6 +1,6 @@
 /** MapLibre sources and layers: base extras (imagery, DEM), light (mood, rays, shadows) and our places/spots. */
 import { GeoJSONSource, Map as MlMap, type RasterTileSource, type LightSpecification } from 'maplibre-gl';
-import type { EventItem, FireIncident, Place, Spot, TrafficCamera } from '../api.js';
+import type { EventItem, FireIncident, Place, Roadwork, Spot, TrafficCamera } from '../api.js';
 import { isOver } from '../events.js';
 import { cameraBearing, ICON, thumbIconId } from './spotGlance.js';
 import { RAIL_COLOR } from './legend.js';
@@ -291,6 +291,17 @@ export function initFeedLayers(map: MlMap) {
   map.addLayer({ id: 'event-points', type: 'circle', source: 'events', filter: ['!', ['has', 'point_count']], layout: { visibility: 'none' },
     paint: { 'circle-radius': 7, 'circle-color': EVENT_COLOR, 'circle-stroke-color': '#0e1014', 'circle-stroke-width': 2 } });
 
+  map.addSource('roadworks', { type: 'geojson', data: empty(), attribution: '© Transport for NSW' });
+  map.addLayer({ id: 'roadworks-line', type: 'line', source: 'roadworks',
+    filter: ['any', ['==', ['geometry-type'], 'LineString'], ['==', ['geometry-type'], 'MultiLineString']],
+    layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': '#f59e0b', 'line-width': 5, 'line-opacity': 0.85, 'line-dasharray': [2, 1] },
+  });
+  map.addLayer({ id: 'roadworks-points', type: 'circle', source: 'roadworks', filter: ['==', ['geometry-type'], 'Point'],
+    layout: { visibility: 'none' },
+    paint: { 'circle-radius': 7, 'circle-color': '#f59e0b', 'circle-stroke-color': '#0e1014', 'circle-stroke-width': 2 },
+  });
+
   // NSW Live Traffic cameras: a camera glyph (places are plain dots) with a cone the way it looks.
   // The cone is a screen-sized icon rotated to the bearing, so it stays small at any zoom.
   if (!map.hasImage('camera')) map.addImage('camera', cameraIcon(), { pixelRatio: 2 });
@@ -463,6 +474,31 @@ export function updateFires(map: MlMap, fires: FireIncident[]) {
   setData(map, 'fires', firesGeoJSON(fires));
 }
 
+export const ROADWORK_LAYERS = ['roadworks-line', 'roadworks-points'];
+export function roadworksGeoJSON(roadworks: Roadwork[]): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: roadworks.map((work) => ({
+      type: 'Feature',
+      id: work.id,
+      properties: {
+        id: work.id,
+        title: work.title,
+        headline: work.headline,
+        start: work.start ?? '',
+        end: work.end ?? '',
+        updated: work.updated ?? '',
+        expectedDelayMinutes: work.expectedDelayMinutes ?? '',
+        advice: work.advice.join(' • '),
+      },
+      geometry: work.geometry,
+    })),
+  };
+}
+export function updateRoadworks(map: MlMap, roadworks: Roadwork[]) {
+  setData(map, 'roadworks', roadworksGeoJSON(roadworks));
+}
+
 const EVENT_COLOR = '#c084fc';
 export const EVENT_LAYERS = ['event-clusters', 'event-cluster-count', 'event-points'];
 
@@ -540,7 +576,7 @@ function cameraIcon(): ImageData {
   return g.getImageData(0, 0, 44, 44);
 }
 
-export const CLICKABLE = ['spot-thumbs', 'place-spot-thumbs', 'spot-points', 'place-spots', 'clusters', 'place-points', 'place-fill', 'place-line', 'candidates', 'fires-pts', 'fires-polys-fill', 'fires-polys-line', 'cameras', 'event-points', 'event-clusters', 'road-quality', 'route-lines', 'route-staging'];
+export const CLICKABLE = ['spot-thumbs', 'place-spot-thumbs', 'spot-points', 'place-spots', 'clusters', 'place-points', 'place-fill', 'place-line', 'candidates', 'fires-pts', 'fires-polys-fill', 'fires-polys-line', 'roadworks-line', 'roadworks-points', 'cameras', 'event-points', 'event-clusters', 'road-quality', 'route-lines', 'route-staging'];
 
 export function setImagery(map: MlMap, on: boolean) {
   map.setLayoutProperty('imagery', 'visibility', on ? 'visible' : 'none');

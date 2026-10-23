@@ -129,10 +129,11 @@ input[type='checkbox'], input[type='radio'] { width: auto; accent-color: var(--a
   backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--border);
 }
-.topbar .logo { font-size: 17px; font-weight: 700; letter-spacing: 0.3px; white-space: nowrap;
+.topbar .logo { display: inline-flex; align-items: center; gap: 7px; font-size: 17px; font-weight: 700; letter-spacing: 0.3px; white-space: nowrap;
   color: var(--text); text-decoration: none; }
+.topbar .logo__cone { width: 24px; height: 24px; flex: 0 0 24px; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .32)); }
 .topbar .logo:hover { opacity: 0.85; }
-.topbar .logo span { color: var(--accent); }
+.topbar .logo__wordmark span { color: var(--accent); }
 .topbar nav { display: flex; gap: 4px; flex: 1; }
 .topbar nav a {
   color: var(--muted);

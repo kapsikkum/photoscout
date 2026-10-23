@@ -62,6 +62,7 @@ export const CATEGORIES: Category[] = [
   { key: 'trains', label: 'Trains', group: 'Overlays', swatch: 'ring', color: '#22c55e', defaultOn: false, match: ids('trains') },
   { key: 'planes', label: 'Planes', group: 'Overlays', swatch: 'glyph', glyph: '✈', color: '#dfe7ff', defaultOn: false, match: ids('planes', 'planes-proj', 'planes-ghost', 'planes-shadow', 'planes-label', 'planes-3d') },
   { key: 'cameras', label: 'Cameras', group: 'Overlays', swatch: 'camera', color: '#38bdf8', defaultOn: false, match: ids('camera-cones', 'cameras') },
+  { key: 'roadworks', label: 'NSW roadworks', group: 'Overlays', swatch: 'line', color: '#f59e0b', defaultOn: false, match: ids('roadworks-line', 'roadworks-points') },
   { key: 'fires', label: 'Fires', group: 'Overlays', swatch: 'dot', color: 'conic-gradient(#ef4444 0 33%, #f97316 0 66%, #eab308 0)', defaultOn: false, match: ids('fires-pts', 'fires-polys-line', 'fires-polys-fill') },
   { key: 'events', label: 'Events', group: 'Overlays', swatch: 'dot', color: '#c084fc', defaultOn: false, match: ids('event-clusters', 'event-cluster-count', 'event-points') },
   { key: 'road-quality', label: 'Road quality', group: 'Overlays', swatch: 'dot', color: 'conic-gradient(#22c55e 0 33%, #f59e0b 0 66%, #ef4444 0)', defaultOn: false, match: ids('road-quality') },

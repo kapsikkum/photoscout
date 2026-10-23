@@ -33,6 +33,7 @@ import { fetchAurora } from './feeds/spaceWeather.js';
 import { fetchBuildings } from './sources/osm.js';
 import { fetchRoadCell, parseCell } from './sources/roads.js';
 import { fetchCameras } from './feeds/cameras.js';
+import { fetchRoadworks } from './feeds/roadworks.js';
 import {
   buildPointPassesResponse, combinedFeedData, combinedRealtime, emptyFeedData, nextPasses, parsePointPassRequest, predictTrainPositions, tripCount, TRAIN_FEEDS,
 } from './feeds/trains.js';
@@ -1115,6 +1116,14 @@ app.get('/api/spots/:id/trains', (req, res) => {
   const hours = Number(req.query.hours ?? 6);
   const passes = nextPasses(combinedFeedData(db), spot, hours, new Date());
   res.json({ configured: true, passes });
+});
+
+// --- NSW roadworks (TfNSW Live Traffic, public cached feed) -------------------
+
+app.get('/api/roadworks', async (_req, res, next) => {
+  try {
+    res.json(await fetchRoadworks());
+  } catch (err) { next(err); }
 });
 
 // --- traffic cameras (TfNSW) --------------------------------------------------

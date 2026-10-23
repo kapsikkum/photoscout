@@ -250,6 +250,23 @@ export interface CamerasResponse {
   cameras: TrafficCamera[];
 }
 
+export interface Roadwork {
+  id: string;
+  title: string;
+  headline: string;
+  start: string | null;
+  end: string | null;
+  updated: string | null;
+  expectedDelayMinutes: number | null;
+  advice: string[];
+  periods: Record<string, unknown>[];
+  geometry: GeoJSON.Point | GeoJSON.LineString | GeoJSON.MultiLineString;
+}
+export interface RoadworksResponse {
+  lastPublished: string | null;
+  roadworks: Roadwork[];
+}
+
 export interface ScoutEvent {
   group: string; title: string; description: string; startTime: string; endTime: string; venueName: string;
   address: string; locality: string; lat: number; lng: number; imageUrl: string | null; category: string; goodDuring: boolean;
@@ -594,6 +611,8 @@ export const api = {
   trainPassesAt: (lat: number, lng: number, hours = 6) =>
     fetch(`/api/trains/passes?lat=${lat}&lng=${lng}&hours=${hours}`).then((r) => json<{ configured: boolean; passes: TrainPass[] }>(r)),
   spotTrains: (spotId: string, hours = 6) => fetch(`/api/spots/${spotId}/trains?hours=${hours}`).then((r) => json<{ configured: boolean; passes: TrainPass[] }>(r)),
+  // --- NSW roadworks (TfNSW Live Traffic) ---
+  roadworks: () => fetch('/api/roadworks').then((r) => json<RoadworksResponse>(r)),
   // --- traffic cameras (TfNSW) ---
   cameras: () => fetch('/api/cameras').then((r) => json<CamerasResponse>(r)),
   // --- Event Scout ---

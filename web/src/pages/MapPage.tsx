@@ -9,14 +9,14 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { locateControl } from '../map/locateControl.js';
 import SuggestSpot from '../components/SuggestSpot.js';
-import { api, Candidate, type EventItem, FireIncident, Place, Plane, type PlaneInfo, Route, Spot, type TrafficCamera, TrainPosition, User, type WeatherForecast, type WindGridResponse } from '../api.js';
+import { api, Candidate, type EventItem, FireIncident, Place, Plane, type PlaneInfo, Roadwork, Route, Spot, type TrafficCamera, TrainPosition, User, type WeatherForecast, type WindGridResponse } from '../api.js';
 import { sunLook } from '../map/sunLook.js';
 import { hourAt, pickRadarFrame, RAINVIEWER_INDEX, radarTileUrl, weatherIcon, type RadarIndex } from '../map/weather.js';
 import { AirCurrentsOverlay } from '../map/airCurrents.js';
 import {
   CLICKABLE, initFeedLayers, initLayers, PLANE_LAYERS, setImagery, setLayerVisible, setTerrain3d, STYLE_URL, updateCandidates, updateDraft, updateRoads, ROADS_MIN_ZOOM,
   updateMood, updatePlacesAndSpots, updatePlanes, updateRail, updateRays, setNearbyHighlight, updateShadows, updateTrains, updateWedges,
-  TRAIN_LAYERS, setTrains3d, updatePlanePositions, hiddenLayers, setRadarFrame, FIRE_LAYERS, updateFires, updateCameras, EVENT_LAYERS, updateEvents,
+  TRAIN_LAYERS, setTrains3d, updatePlanePositions, hiddenLayers, setRadarFrame, FIRE_LAYERS, updateFires, ROADWORK_LAYERS, updateRoadworks, updateCameras, EVENT_LAYERS, updateEvents,
 } from '../map/layers.js';
 import { due, MotionTracker, planePredict, trainPredict } from '../map/motion.js';
 import { carriageCount } from '../map/trains3d.js';
@@ -84,7 +84,7 @@ const newSpot = (lat: number, lng: number, placeId: string | null = null): SpotD
 });
 
 /** Legend keys whose visibility is applied by their own effect below. */
-const FEED_KEYS = ['imagery', 'planes', 'rail', 'trains', 'candidates', 'road-quality', 'weather', 'fires', 'cameras', 'events'];
+const FEED_KEYS = ['imagery', 'planes', 'rail', 'trains', 'candidates', 'road-quality', 'weather', 'fires', 'roadworks', 'cameras', 'events'];
 const RADAR_POLL_MS = 10 * 60_000;
 
 type RouteHistoryEntry = { draft: RouteDraft; duration: number | null; ready: boolean };
@@ -187,13 +187,14 @@ export default function MapPage({ user }: { user: User | null }) {
   }, [map]);
   // One panel at a time: a core panel (spot, place, route, editor) closes a plugin's, and a plugin's clears the selection.
   useEffect(() => { if (selected || editing) pluginRegistry.closeSidePanels(); }, [selected, editing]);
-  const { planes: planesOn, rail: railOn, trains: trainsOn, candidates: candidatesOn, imagery, weather: weatherOn, fires: firesOn, cameras: camerasOn, events: eventsOn } = vis;
+  const { planes: planesOn, rail: railOn, trains: trainsOn, candidates: candidatesOn, imagery, weather: weatherOn, fires: firesOn, roadworks: roadworksOn, cameras: camerasOn, events: eventsOn } = vis;
   const railEffectiveOn = effectiveRailOn(railOn, trainsOn);
   const baseRailPaint = useRef<BaseRailPaintSnapshot[] | null>(null);
   const routesOn = vis.routes;
   const [rail, setRail] = useState<GeoJSON.FeatureCollection | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [fires, setFires] = useState<FireIncident[]>([]);
+  const [roadworkData, setRoadworkData] = useState<Roadwork[]>([]);
   const [planeData, setPlaneData] = useState<Plane[]>([]);
   const [trainData, setTrainData] = useState<TrainPosition[]>([]);
   const [cameraData, setCameraData] = useState<TrafficCamera[]>([]);
@@ -389,6 +390,26 @@ export default function MapPage({ user }: { user: User | null }) {
     setLayerVisible(map, FIRE_LAYERS, !!firesOn);
     if (firesOn) updateFires(map, fires);
   }, [map, firesOn, fires]);
+
+  // NSW scheduled roadworks: fetched only while visible and refreshed every 5 min.
+  useEffect(() => {
+    if (!map) return;
+    setLayerVisible(map, ROADWORK_LAYERS, !!roadworksOn);
+    if (!roadworksOn) return;
+    let stop = false;
+    const load = () => api.roadworks().then((res) => {
+      if (stop) return;
+      setRoadworkData(res.roadworks);
+      updateRoadworks(map, res.roadworks);
+    }).catch((err) => { if (!stop) setError((err as Error).message); });
+    load();
+    const id = setInterval(load, 5 * 60_000);
+    return () => { stop = true; clearInterval(id); };
+  }, [map, roadworksOn]);
+
+  useEffect(() => {
+    if (map && roadworksOn && roadworkData.length > 0) updateRoadworks(map, roadworkData);
+  }, [map, roadworksOn, roadworkData]);
 
   // NSW Live Traffic cameras: fetched when the layer is on and polled every 10 min.
   useEffect(() => {
@@ -1050,6 +1071,10 @@ export default function MapPage({ user }: { user: User | null }) {
       return;
     }
     const id = hit.properties?.id as string;
+    if (ROADWORK_LAYERS.includes(hit.layer.id)) {
+      showRoadworkPopup(map, [lng, lat], hit.properties ?? {});
+      return;
+    }
     if (hit.layer.id === 'cameras') {
       const coords = (hit.geometry as GeoJSON.Point).coordinates as [number, number];
       showCameraPopup(map, coords, hit.properties ?? {});
@@ -1328,6 +1353,7 @@ export default function MapPage({ user }: { user: User | null }) {
             { key: 'trains', label: category('trains').label, swatch: <Swatch cat={category('trains')} />, on: trainsOn, title: 'Live passenger train positions, refreshed every 20s (needs a TfNSW key)', onSelect: () => toggle('trains') },
             { key: 'weather', label: category('weather').label, swatch: <Swatch cat={category('weather')} />, on: weatherOn, title: 'Rain radar (RainViewer, recent past only) and the forecast at the map centre for the map time', onSelect: () => toggle('weather') },
             { key: 'cameras', label: category('cameras').label, swatch: <Swatch cat={category('cameras')} />, on: camerasOn, title: 'NSW live traffic cameras (TfNSW)', onSelect: () => toggle('cameras') },
+            { key: 'roadworks', label: category('roadworks').label, swatch: <Swatch cat={category('roadworks')} />, on: roadworksOn, title: 'Scheduled NSW roadworks (TfNSW Live Traffic), refreshed every 5 minutes', onSelect: () => toggle('roadworks') },
             { key: 'fires', label: category('fires').label, swatch: <Swatch cat={category('fires')} />, on: !!vis.fires, onSelect: () => toggle('fires') },
             ...pluginMenuItems('live'),
           ] },
@@ -1606,6 +1632,24 @@ function showFirePopup(map: MlMap, at: [number, number], p: Record<string, any>)
     + (status ? `<span>Status: ${status}${size}</span>` : '')
     + link;
   openPopup(map, at, html);
+}
+
+function showRoadworkPopup(map: MlMap, at: [number, number], p: Record<string, any>) {
+  const format = (value: unknown) => {
+    const time = Date.parse(String(value ?? ''));
+    return Number.isFinite(time) ? new Date(time).toLocaleString() : '';
+  };
+  const title = escapeHtml(String(p.title || 'Scheduled roadwork'));
+  const headline = String(p.headline || '').trim();
+  const delay = Number(p.expectedDelayMinutes);
+  const schedule = [format(p.start), format(p.end)].filter(Boolean).join(' – ');
+  const lines = [
+    headline ? escapeHtml(headline) : '',
+    schedule ? `Schedule: ${escapeHtml(schedule)}` : '',
+    Number.isFinite(delay) ? `Expected delay: ${Math.round(delay)} min` : '',
+    p.advice ? escapeHtml(String(p.advice)) : '',
+  ].filter(Boolean);
+  openPopup(map, at, `<strong>${title}</strong>${lines.length ? `<br/><span>${lines.join('<br/>')}</span>` : ''}<br/><small>Source: Transport for NSW Live Traffic</small>`);
 }
 
 /** Map control: fly back to the instance's home (Settings), read on each click so an edited home applies at once. */

@@ -22,6 +22,8 @@ const layers = [
   { id: 'rays', type: 'line', source: 'rays' },
   { id: 'night-lights', type: 'raster' },
   { id: 'fires-pts', type: 'circle', source: 'fires' },
+  { id: 'roadworks-line', type: 'line', source: 'roadworks' },
+  { id: 'roadworks-points', type: 'circle', source: 'roadworks' },
   { id: 'background', type: 'background' },
 ];
 
@@ -30,7 +32,7 @@ test('classifies base style and overlay layers', () => {
   assert.deepEqual(got, {
     road_motorway: 'roads', road_major_rail: 'rail-base', tunnel_transit_rail: 'rail-base', road_path_pedestrian: 'roads',
     water: 'water', waterway_river: 'water', waterway_line_label: 'labels', 'building-3d': 'buildings', boundary_2: 'boundaries',
-    park: 'water', label_town: 'labels', poi_r1: 'labels', 'rail-lines': 'rail', rays: 'sun', 'night-lights': 'night-lights', 'fires-pts': 'fires',
+    park: 'water', label_town: 'labels', poi_r1: 'labels', 'rail-lines': 'rail', rays: 'sun', 'night-lights': 'night-lights', 'fires-pts': 'fires', 'roadworks-line': 'roadworks', 'roadworks-points': 'roadworks',
     'route-lines': 'routes', 'route-staging': 'routes', background: null,
   });
   assert.deepEqual(groupLayers(layers).water, ['water', 'waterway_river', 'park']);

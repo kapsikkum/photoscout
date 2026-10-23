@@ -99,7 +99,14 @@ export default function App() {
             </svg>
           )}
         </button>
-        <Link className="logo" to="/">Photo<span>Scout</span></Link>
+        <Link className="logo" to="/" aria-label="PhotoScout home">
+          <svg className="logo__cone" viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M16 3 25 25H7L16 3Z" fill="#f97316" />
+            <path d="M12.7 11h6.6l1.5 4H11.2l1.5-4ZM9.5 20h13l1.5 4H8l1.5-4Z" fill="#f8fafc" />
+            <path d="M5 25h22l2 4H3l2-4Z" fill="#f59e0b" />
+          </svg>
+          <span className="logo__wordmark">Photo<span>Scout</span></span>
+        </Link>
         <nav className={menuOpen ? 'is-open' : ''}>
           {NAV.filter(([path]) => user || path !== '/chat').map(([path, label]) => (
             <Link key={path} to={path} className={active(path) ? 'active' : ''}>{label}</Link>
