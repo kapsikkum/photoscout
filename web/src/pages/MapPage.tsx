@@ -906,8 +906,15 @@ export default function MapPage({ user }: { user: User | null }) {
     return () => { overlay.destroy(); airCurrents.current = null; };
   }, [map]);
   useEffect(() => {
-    airCurrents.current?.update({ visible: weatherOn, windKmh: wxHour?.windKmh ?? null, windDeg: wxHour?.windDeg ?? null, windGrid });
-  }, [weatherOn, wxHour?.windKmh, wxHour?.windDeg, windGrid]);
+    airCurrents.current?.update({
+      visible: weatherOn,
+      windKmh: wxHour?.windKmh ?? null,
+      windDeg: wxHour?.windDeg ?? null,
+      gustKmh: wxHour?.gustKmh ?? null,
+      precipMm: wxHour?.precipMm ?? null,
+      windGrid,
+    });
+  }, [weatherOn, wxHour?.windKmh, wxHour?.windDeg, wxHour?.gustKmh, wxHour?.precipMm, windGrid]);
   // Categories without their own feed effect: apply straight from the legend state.
   useEffect(() => {
     if (!map) return;
