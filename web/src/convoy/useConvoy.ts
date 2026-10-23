@@ -134,6 +134,8 @@ export interface Convoy {
   me: string | null;
   rooms: Room[];
   room: Room | null;
+  /** Your fresh shared GPS fix, while an active convoy is connected and sharing is enabled. */
+  position: Position | null;
   /** The active room as a map wants it: members with your own position filled in, who leads, where it is going. */
   view: ConvoyView | null;
   error: string;
@@ -153,12 +155,13 @@ export interface Convoy {
   remove(id: string): void;
 }
 
-export function useConvoy(): Convoy {
+export function useConvoy(enabled = true): Convoy {
   useEffect(() => {
+    if (!enabled) return;
     if (users++ === 0) start();
     syncWatch();
     return () => { if (--users === 0) stop(); };
-  }, []);
+  }, [enabled]);
   const s = useSyncExternalStore(subscribe, () => snap);
   const room = activeRoom(s.state);
 
@@ -190,6 +193,7 @@ export function useConvoy(): Convoy {
     me: s.state.me,
     rooms: s.state.rooms,
     room,
+    position: s.sharing ? s.mine : null,
     view: room && viewOf(room, s.state.me, s.sharing ? s.mine : null),
     error: s.state.error,
     sharing: s.sharing,

@@ -1014,8 +1014,13 @@ input[type='checkbox'], input[type='radio'] { width: auto; accent-color: var(--a
 
 /* ── Map legend ── */
 .legend { position: absolute; left: 10px; bottom: 140px; z-index: 6; display: flex; flex-direction: column-reverse; align-items: flex-start; gap: 6px; max-width: calc(100% - 20px); }
-.legend > .chip { background: var(--glass); backdrop-filter: blur(6px); }
-.legend > .chip.active { background: #2b2412; }
+/* With the lower controls hidden, keep Legend and its sun toggle directly over MapLibre's scale. */
+.mapshell--time-hidden { --timebar-h: 0px; }
+.mapshell--time-hidden .legend { bottom: 44px; }
+.legend__controls { display: flex; align-items: center; gap: 6px; }
+.legend__controls > .chip { background: var(--glass); backdrop-filter: blur(6px); }
+.legend__controls > .chip.active { background: #2b2412; }
+.legend__time-toggle { min-width: 40px; padding-inline: 0; justify-content: center; font-size: 16px; }
 .legend__panel { width: 250px; max-width: 100%; max-height: min(60vh, calc(100dvh - 240px)); overflow-y: auto; background: var(--glass);
   border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 12px 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); }
 .legend__panel h4 { margin: 10px 0 4px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
@@ -2034,6 +2039,10 @@ svg.drive__report-icon { display: inline-block; width: 1.3em; height: 1.3em; ver
 .convoy-session-error { position: fixed; z-index: 86; top: var(--topbar-h); width: 100%; padding: 12px; background: var(--panel); border-bottom: 1px solid var(--red); }
 .convoy-dock { position: fixed; z-index: 45; right: 60px; top: calc(var(--topbar-h) + 12px); width: min(340px, calc(100vw - 24px)); background: var(--glass); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 28px #0005; }
 .convoy-dock__toggle { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 10px; border: 0; background: none; text-align: left; min-height: 48px; }
+/* On the Map, the collapsed convoy state is a normal 40px map chip rather than a second panel. */
+.convoy-dock--map:not(.is-expanded) { width: auto; background: none; border: 0; border-radius: 0; box-shadow: none; }
+.convoy-dock--map:not(.is-expanded) .convoy-dock__toggle { width: auto; min-height: 40px; padding: 4px 12px; background: var(--glass); border: 1px solid var(--border); border-radius: var(--pill); backdrop-filter: blur(6px); font-size: 13px; }
+.convoy-dock--map:not(.is-expanded) > .convoy-connection { display: none; }
 .convoy-dock__toggle, .convoy-dock > .convoy-connection { flex-shrink: 0; }
 .convoy-dock__toggle > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .convoy-dock__body { padding: 0 12px 12px; max-height: calc(100dvh - var(--topbar-h) - 120px); overflow-y: auto; }
@@ -2070,10 +2079,15 @@ svg.drive__report-icon { display: inline-block; width: 1.3em; height: 1.3em; ver
 .convoy__head h2, .convoy__dest, .convoy__members a { overflow-wrap: anywhere; }
 .convoy__entry { grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); }
 .convoy__card { min-width: 0; }
+@media (min-width: 641px) {
+  /* Keep the active-convoy dock out of a desktop map detail panel. */
+  #root:has(.mapshell--panel) .convoy-dock--map { right: 456px; }
+}
 @media (max-width: 640px) {
   .convoy-dock { top: auto; left: 8px; right: 8px; bottom: calc(env(safe-area-inset-bottom, 0px) + 8px); width: auto; display: flex; flex-direction: column; max-height: calc(100dvh - var(--topbar-h) - 24px); }
-  .convoy-dock--map { top: calc(var(--topbar-h) + 52px); bottom: auto; right: 52px; max-height: calc(100dvh - var(--topbar-h) - 52px - 86px); }
-  .convoy-dock--map.is-expanded { right: 8px; }
+  /* A Map panel owns the top of a phone screen; keep the compact convoy state above the time bar instead. */
+  .convoy-dock--map { top: auto; left: auto; right: 8px; bottom: calc(env(safe-area-inset-bottom, 0px) + 92px); width: min(260px, calc(100vw - 16px)); max-height: calc(100dvh - var(--topbar-h) - 104px); }
+  .convoy-dock--map.is-expanded { left: 8px; right: 8px; width: auto; }
   .convoy-dock__body { min-height: 0; max-height: none; overflow-y: auto; overscroll-behavior: contain; }
   #root:has(.convoy-dock:not(.convoy-dock--map)) .page { padding-bottom: 120px; }
   .convoy-chat__form input, .convoy__card input { font-size: 16px; }

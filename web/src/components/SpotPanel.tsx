@@ -8,6 +8,7 @@ import DayStrip from './DayStrip.js';
 import { GoodTimesChips } from './GoodTimesEditor.js';
 import Photos from './Photos.js';
 import Nearby from './Nearby.js';
+import { useConvoyHandoff } from '../convoy/useConvoyHandoff.js';
 
 export function formatAlignment(a: Alignment) {
   const day = a.start.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
@@ -27,7 +28,7 @@ function fireIncidentPoint(geom: GeoJSON.Geometry): [number, number] | null {
 
 const ADVICE_OR_ABOVE = new Set(['Advice', 'Watch and Act', 'Emergency Warning', 'Emergency']);
 
-export default function SpotPanel({ spot, place, time, fires = [], canEdit, onEdit, onDelete, onMove, onCreateSpotAt }: {
+export default function SpotPanel({ spot, place, time, fires = [], canEdit, onEdit, onDelete, onMove, onCreateSpotAt, canUseConvoy }: {
   spot: Spot;
   place: Place | undefined;
   time: Date;
@@ -37,7 +38,9 @@ export default function SpotPanel({ spot, place, time, fires = [], canEdit, onEd
   onDelete: () => void;
   onMove: (lat: number, lng: number) => void;
   onCreateSpotAt: (lat: number, lng: number) => Promise<Spot>;
+  canUseConvoy: boolean;
 }) {
+  const convoy = useConvoyHandoff(canUseConvoy);
   const next = useMemo(() => alignments(spot, time, 365, 3), [spot, time]); // cached per day, so cheap to redo
   const good = goodNow(spot, time);
 
@@ -68,7 +71,9 @@ export default function SpotPanel({ spot, place, time, fires = [], canEdit, onEd
         {spot.facingDeg != null ? `Facing ${Math.round(spot.facingDeg)}° (${spot.fovDeg ?? 60}° FOV)` : 'No facing set'} · {spot.visibility}
       </p>
       {spot.notes && <p className="panel__notes">{spot.notes}</p>}
-      <p className="hint"><Link to={`/drive?to=${spot.lat},${spot.lng}`}>Drive there</Link></p>
+      <p className="hint">{convoy.active
+        ? <button className="linkbtn" disabled={!convoy.canSet} title={convoy.disabledReason} onClick={() => convoy.setPoint(spot.lat, spot.lng, spot.name)}>Convoy there</button>
+        : <Link to={`/drive?to=${spot.lat},${spot.lng}`}>Drive there</Link>}</p>
       {spot.tags.length > 0 && <div className="chiprow">{spot.tags.map((t) => <span key={t} className="chip">#{t}</span>)}</div>}
 
       <h4>Photos</h4>

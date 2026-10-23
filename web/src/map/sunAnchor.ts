@@ -43,6 +43,11 @@ export function shouldShowSunPlanner(sunAnchor: Coordinate | null, selectedSpot:
   return sunAnchor !== null || selectedSpot !== null;
 }
 
+/** A visible time-control surface needs rays/wedges; a placed anchor keeps them useful when controls are compacted. */
+export function shouldShowSunLayer(timeControlsVisible: boolean, sunAnchor: Coordinate | null): boolean {
+  return timeControlsVisible || sunAnchor !== null;
+}
+
 /** Starts the anchor tool with its supporting rays and wedges visible. */
 export function startSunAnchorTool<T extends Record<string, boolean>>(visibility: T): T & { sun: true } {
   return { ...visibility, sun: true };

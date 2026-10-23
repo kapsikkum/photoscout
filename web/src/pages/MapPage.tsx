@@ -1,6 +1,8 @@
 import { loadRoads, type RoadsStatus } from '../map/roadQuality';
 import ActivityLog from '../components/ActivityLog.js';
 import { MapConvoy } from '../convoy/ConvoySession.js';
+import { useConvoyHandoff } from '../convoy/useConvoyHandoff.js';
+import { convoyNavigationRequest, shouldRefreshConvoyNavigation } from '../convoy/navigation.js';
 import { logActivity, logSuccessIfNews } from '../activity.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -42,6 +44,7 @@ import SpotEditor, { SpotDraft } from '../components/SpotEditor.js';
 import PlaceEditor, { draftToPlace, PlaceDraft, placeToDraft } from '../components/PlaceEditor.js';
 import RouteEditor, { blankRouteDraft, draftToRoute, RouteDraft, routeToDraft } from '../components/RouteEditor.js';
 import { fetchOsrmFullRoute, routeDistanceKm, routeStops, routingWaypoints } from '../map/routeGeometry.js';
+import { fetchNavRoute } from '../drive/route.js';
 import { updateRoutes, ROUTE_LINE_LAYER } from '../map/routeLayer.js';
 import { RouteWaypointMarkers, RouteStagingMarker } from '../map/routeWaypointMarkers.js';
 import { emptyGoodTimes } from '../components/GoodTimesEditor.js';
@@ -55,6 +58,7 @@ import {
   resolveDisplayOrigin,
   resolveSunPlannerBearing,
   shouldShowSunPlanner,
+  shouldShowSunLayer,
   startSunAnchorTool,
   SunAnchorController,
   updateSelectedBearingProjection,
@@ -66,6 +70,8 @@ type Editing = { type: 'spot'; draft: SpotDraft } | { type: 'place'; draft: Plac
 const TRAINS_POLL_MS = 20_000; // matches the server's realtime cache
 /** Follow mode re-centres the camera this often, with a linear ease of the same length so the motion is continuous. */
 const FOLLOW_EASE_MS = 1000;
+const CONVOY_NAV_SOURCE = 'convoy-navigation';
+const CONVOY_NAV_LAYERS = ['convoy-navigation-casing', 'convoy-navigation-line'] as const;
 
 type Follow = { kind: 'plane' | 'train'; id: string; name: string; heading: boolean };
 const planeName = (p: { flight: string; hex: string }) => p.flight.trim() || p.hex.toUpperCase();
@@ -83,6 +89,13 @@ const newSpot = (lat: number, lng: number, placeId: string | null = null): SpotD
   name: '', notes: '', lat, lng, placeId, tags: [], facingDeg: null, fovDeg: null, goodTimes: emptyGoodTimes(), visibility: 'private',
 });
 
+function convoyNavigationData(coords: [number, number][]): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: coords.length >= 2 ? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }] : [],
+  };
+}
+
 /** Legend keys whose visibility is applied by their own effect below. */
 const FEED_KEYS = ['imagery', 'planes', 'rail', 'trains', 'candidates', 'road-quality', 'weather', 'fires', 'cameras', 'events'];
 const RADAR_POLL_MS = 10 * 60_000;
@@ -90,12 +103,14 @@ const RADAR_POLL_MS = 10 * 60_000;
 type RouteHistoryEntry = { draft: RouteDraft; duration: number | null; ready: boolean };
 
 export default function MapPage({ user }: { user: User | null }) {
+  const convoy = useConvoyHandoff(Boolean(user));
   const container = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<MlMap | null>(null);
   const [places, setPlaces] = useState<Place[]>([]);
   const [spots, setSpots] = useState<Spot[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [error, setError] = useState('');
+  const [convoyNavigationNote, setConvoyNavigationNote] = useState('');
   const [selected, setSelected] = useState<Selection>(null);
   const [editing, setEditing] = useState<Editing>(null);
   const [stagingMode, setStagingMode] = useState(false);
@@ -115,12 +130,18 @@ export default function MapPage({ user }: { user: User | null }) {
   const [sunAnchorBearing, setSunAnchorBearing] = useState<number | null>(null);
   const [terrain, setTerrainOn] = useState(false);
   const [goodOnly, setGoodOnly] = useState(false);
+  const [timeControlsVisible, setTimeControlsVisible] = useState(true);
   const [centre, setCentre] = useState({ lat: -33.419, lng: 149.577 });
   const [view, setView] = useState(0); // bumps on moveend, for zoom-scaled geometry and shadows
   const [params, setParams] = useSearchParams();
   const initialMapPoint = useRef(params.has('lat') && params.has('lng') && Number.isFinite(Number(params.get('lat'))) && Number.isFinite(Number(params.get('lng'))) && Math.abs(Number(params.get('lat'))) <= 90 && Math.abs(Number(params.get('lng'))) <= 180
     ? { lat: Number(params.get('lat')), lng: Number(params.get('lng')) } : null);
   const { time, setTime } = useMapTime();
+  const convoyNavigation = useMemo(() => convoyNavigationRequest(convoy.position, convoy.destination), [
+    convoy.position?.lat, convoy.position?.lng, convoy.destination?.lat, convoy.destination?.lng,
+  ]);
+  const lastConvoyNavigation = useRef<ReturnType<typeof convoyNavigationRequest>>(null);
+  const convoyNavigationAbort = useRef<AbortController | null>(null);
 
   const sunAnchorController = useRef<SunAnchorController | null>(null);
   if (!sunAnchorController.current) {
@@ -142,6 +163,10 @@ export default function MapPage({ user }: { user: User | null }) {
   // Layer visibility: one source of truth for the legend and the chips.
   const [vis, setVis] = useState<Visibility>(loadVisibility);
   useEffect(() => saveVisibility(vis), [vis]);
+  useEffect(() => {
+    const sun = shouldShowSunLayer(timeControlsVisible, sunAnchor);
+    setVis((visibility) => visibility.sun === sun ? visibility : { ...visibility, sun });
+  }, [timeControlsVisible, sunAnchor?.lat, sunAnchor?.lng]);
   const toggle = (key: string, on = !vis[key]) => setVis((v) => ({ ...v, [key]: on }));
   // Plugin contributions (web/src/plugins). Their toggles join the legend and the menus below; their layers,
   // clicks, panels and polling are driven by the registry, so none of that is wired up in this file.
@@ -225,6 +250,46 @@ export default function MapPage({ user }: { user: User | null }) {
     m.on('moveend', onMove);
     return () => m.remove();
   }, []);
+
+  // The map is the shared spatial view: while a convoy has both our fresh GPS fix
+  // and a shared destination, draw the same road route Drive would calculate.
+  useEffect(() => {
+    if (!map) return;
+    map.addSource(CONVOY_NAV_SOURCE, { type: 'geojson', data: convoyNavigationData([]) });
+    map.addLayer({ id: CONVOY_NAV_LAYERS[0], type: 'line', source: CONVOY_NAV_SOURCE,
+      layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#07131f', 'line-width': 9, 'line-opacity': 0.9 } });
+    map.addLayer({ id: CONVOY_NAV_LAYERS[1], type: 'line', source: CONVOY_NAV_SOURCE,
+      layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#4cc3ff', 'line-width': 5, 'line-opacity': 0.95 } });
+  }, [map]);
+
+  useEffect(() => () => { convoyNavigationAbort.current?.abort(); }, []);
+
+  useEffect(() => {
+    if (!map) return;
+    const source = map.getSource(CONVOY_NAV_SOURCE) as GeoJSONSource | undefined;
+    if (!source) return;
+    if (!convoyNavigation) {
+      convoyNavigationAbort.current?.abort();
+      convoyNavigationAbort.current = null;
+      lastConvoyNavigation.current = null;
+      source.setData(convoyNavigationData([]));
+      setConvoyNavigationNote(convoy.active && convoy.destination ? (convoy.geoError || 'Share your position to show the route to the convoy destination.') : '');
+      return;
+    }
+    if (!shouldRefreshConvoyNavigation(lastConvoyNavigation.current, convoyNavigation)) return;
+    convoyNavigationAbort.current?.abort();
+    const abort = new AbortController();
+    convoyNavigationAbort.current = abort;
+    lastConvoyNavigation.current = convoyNavigation;
+    setConvoyNavigationNote('');
+    void fetchNavRoute(convoyNavigation, abort.signal)
+      .then((route) => {
+        if (!abort.signal.aborted) (map.getSource(CONVOY_NAV_SOURCE) as GeoJSONSource | undefined)?.setData(convoyNavigationData(route.coords));
+      })
+      .catch((err: unknown) => {
+        if (!abort.signal.aborted) setConvoyNavigationNote((err as Error).message);
+      });
+  }, [map, convoyNavigation, convoy.active, convoy.destination, convoy.geoError]);
 
   useEffect(() => { void reload(); }, []);
 
@@ -1241,9 +1306,12 @@ export default function MapPage({ user }: { user: User | null }) {
 
 
   return (
-    <div className={`mapshell${isPanelActive ? ' mapshell--panel' : ''}${editing ? ' mapshell--editing' : ''}${weatherOn && forecast ? ' mapshell--has-weather' : ''}`}>
+    <div className={`mapshell${isPanelActive ? ' mapshell--panel' : ''}${editing ? ' mapshell--editing' : ''}${weatherOn && forecast ? ' mapshell--has-weather' : ''}${timeControlsVisible ? '' : ' mapshell--time-hidden'}`}>
       <div ref={container} className="mapshell__map" />
       {user && <MapConvoy map={map} />}
+      {convoy.active && convoy.destination && convoyNavigationNote && (
+        <div className="mapinstruction" role="status">{convoyNavigationNote}</div>
+      )}
       {follow && (
         <div className="followpill" role="status">
           <span>Following <strong>{follow.name}</strong></span>
@@ -1266,7 +1334,10 @@ export default function MapPage({ user }: { user: User | null }) {
       {openEvent && eventFeed.events?.find((e) => e.group === openEvent) && (
         <EventDetail ev={eventFeed.events.find((e) => e.group === openEvent)!} user={user} onClose={() => setOpenEvent(null)} onMark={user ? eventFeed.mark : undefined} onRsvp={user ? eventFeed.rsvp : undefined} />
       )}
-      <Legend map={map} vis={legendVis} onToggle={toggleAny} extra={pluginCategories} />
+      <Legend map={map} vis={legendVis} onToggle={toggleAny} extra={pluginCategories}
+        control={<button className={`chip legend__time-toggle${timeControlsVisible ? ' active' : ''}`} onClick={() => setTimeControlsVisible((visible) => !visible)}
+          aria-pressed={timeControlsVisible} aria-label={timeControlsVisible ? 'Minimise time and sunlight controls' : 'Show time and sunlight controls'}
+          title={timeControlsVisible ? 'Minimise time and sunlight controls' : 'Show time and sunlight controls'}>☀</button>} />
       <div className="mapcorner">
         <PluginCornerPanels />
         <div className="mapcorner__row">
@@ -1327,7 +1398,7 @@ export default function MapPage({ user }: { user: User | null }) {
           ] }] : []),
         ]} />
       </div>
-      <div className="sunanchor-controls" role="group" aria-label="Sun anchor controls">
+      {timeControlsVisible && <div className="sunanchor-controls" role="group" aria-label="Sun anchor controls">
         <button
           type="button"
           className={mode === 'anchor' ? 'active' : ''}
@@ -1347,7 +1418,7 @@ export default function MapPage({ user }: { user: User | null }) {
           Clear
         </button>
         <span>{sunAnchor ? `${sunAnchor.lat.toFixed(5)}, ${sunAnchor.lng.toFixed(5)}` : 'No anchor set'}</span>
-      </div>
+      </div>}
 
       {panelOpen && (
         <aside className={`panel panel--${sheetSize}`}>
@@ -1425,7 +1496,7 @@ export default function MapPage({ user }: { user: User | null }) {
                 onEdit={() => { setEditing({ type: 'spot', draft: { ...selectedSpot } }); focus(selectedSpot.lng, selectedSpot.lat); }}
                 onDelete={() => void deleteSpot(selectedSpot)}
                 onMove={async (lat, lng) => { await api.updateSpot(selectedSpot.id, { lat, lng }); await reload(); focus(lng, lat); }}
-                onCreateSpotAt={(lat, lng) => createSpotAt(lat, lng, selectedSpot.placeId)} />
+                onCreateSpotAt={(lat, lng) => createSpotAt(lat, lng, selectedSpot.placeId)} canUseConvoy={Boolean(user)} />
               <SunBearingPlanner
                 lat={selectedSpot.lat}
                 lng={selectedSpot.lng}
@@ -1450,7 +1521,10 @@ export default function MapPage({ user }: { user: User | null }) {
               </ul>
               <div className="panel__actions">
                 <Link to={`/places/${selectedPlace.id}`}><button>Place page</button></Link>
-                {user && <Link to={`/convoy?to=${selectedPlace.lat},${selectedPlace.lng}&label=${encodeURIComponent(selectedPlace.name)}`}><button>Set convoy destination</button></Link>}
+                {user && (convoy.active
+                  ? <button disabled={!convoy.canSet} title={convoy.disabledReason} onClick={() => convoy.setPoint(selectedPlace.lat, selectedPlace.lng, selectedPlace.name)}>Convoy there</button>
+                  : <Link to={`/drive?to=${selectedPlace.lat},${selectedPlace.lng}`}><button>Drive there</button></Link>)}
+                {user && !convoy.active && <Link to={`/convoy?to=${selectedPlace.lat},${selectedPlace.lng}&label=${encodeURIComponent(selectedPlace.name)}`}><button>Set convoy destination</button></Link>}
                 {canEdit(selectedPlace.ownerId) && <>
                   <button className="primary" onClick={() => setEditing({ type: 'place', draft: placeToDraft(selectedPlace) })}>Edit</button>
                   <button onClick={() => { setSelected(null); setEditing({ type: 'spot', draft: newSpot(selectedPlace.lat, selectedPlace.lng, selectedPlace.id) }); }}>+ Spot in place</button>
@@ -1465,8 +1539,10 @@ export default function MapPage({ user }: { user: User | null }) {
               {selectedRoute.notes && <p className="panel__notes">{selectedRoute.notes}</p>}
               <div className="panel__actions">
                 <Link to={`/plan?route=${selectedRoute.id}`}><button>Plan shoot</button></Link>
-                {user && <Link to={`/drive?route=${selectedRoute.id}`}><button>Drive it</button></Link>}
-                {user && <Link to={`/convoy?route=${selectedRoute.id}`}><button>Share with convoy</button></Link>}
+                {user && (convoy.active
+                  ? <button disabled={!convoy.canSet} title={convoy.disabledReason} onClick={() => convoy.setRoute(selectedRoute)}>Convoy there</button>
+                  : <Link to={`/drive?route=${selectedRoute.id}`}><button>Drive it</button></Link>)}
+                {user && !convoy.active && <Link to={`/convoy?route=${selectedRoute.id}`}><button>Share with convoy</button></Link>}
                 {canEdit(selectedRoute.ownerId) && <><button className="primary" onClick={() => openRouteEdit(routeToDraft(selectedRoute))}>Edit</button><button className="danger" onClick={() => void deleteRoute(selectedRoute)}>Delete</button></>}
               </div>
             </>
@@ -1500,7 +1576,7 @@ export default function MapPage({ user }: { user: User | null }) {
           {radarFrame?.nowcast && <span className="wxpill__muted">· radar nowcast</span>}
         </div>
       )}
-      <TimeBar lat={displayOrigin.lat} lng={displayOrigin.lng} />
+      {timeControlsVisible && <TimeBar lat={displayOrigin.lat} lng={displayOrigin.lng} />}
     </div>
   );
 }

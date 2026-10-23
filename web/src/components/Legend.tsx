@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import type { Map as MlMap } from 'maplibre-gl';
 import { CATEGORIES, swatchColor, type Category, type LegendLayer, type Visibility } from '../map/legend.js';
 
@@ -16,13 +16,16 @@ export function Swatch({ cat, color = cat.color }: { cat: Category; color?: stri
 }
 
 /** Collapsible map legend: one row per layer category, with a swatch and a visibility checkbox. */
-export function Legend({ map, vis, onToggle, extra = [] }: { map: MlMap | null; vis: Visibility; onToggle: (key: string, on: boolean) => void; extra?: readonly Category[] }) {
+export function Legend({ map, vis, onToggle, extra = [], control }: { map: MlMap | null; vis: Visibility; onToggle: (key: string, on: boolean) => void; extra?: readonly Category[]; control?: ReactNode }) {
   const [open, setOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth > 820);
   const layers = useMemo(() => (map?.getStyle().layers ?? []) as LegendLayer[], [map]);
   const groups = ['Base map', 'Overlays'] as const;
   return (
     <div className={`legend${open ? ' legend--open' : ''}`}>
-      <button className={`chip${open ? ' active' : ''}`} onClick={() => setOpen(!open)} aria-expanded={open}>Legend</button>
+      <div className="legend__controls">
+        <button className={`chip${open ? ' active' : ''}`} onClick={() => setOpen(!open)} aria-expanded={open}>Legend</button>
+        {control}
+      </div>
       {open && (
         <div className="legend__panel">
           {groups.map((g) => (

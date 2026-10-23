@@ -15,6 +15,7 @@ import {
   resolveDisplayOrigin,
   resolveSunPlannerBearing,
   shouldShowSunPlanner,
+  shouldShowSunLayer,
   type ScreenPixel,
   normalizeAnchorBearing,
   selectedBearingProjectionGeoJSON,
@@ -125,6 +126,14 @@ test('sun anchor tool: enables the sun overlay and closes back to a clean browse
   assert.deepEqual(startSunAnchorTool(visibility), { sun: true, spots: true, terrain: false });
   assert.deepEqual(visibility, { sun: false, spots: true, terrain: false }, 'does not mutate saved overlay choices');
   assert.deepEqual(closeSunAnchorTool(), { anchor: null, bearing: null, mode: 'browse' });
+});
+
+test('sun layer follows the compact time controls unless an anchor needs it', () => {
+  const anchor = { lat: -33.4, lng: 149.5 };
+
+  assert.equal(shouldShowSunLayer(true, null), true, 'expanded controls show the rays and wedges');
+  assert.equal(shouldShowSunLayer(false, null), false, 'minimised controls hide them without an anchor');
+  assert.equal(shouldShowSunLayer(false, anchor), true, 'an active anchor keeps them visible');
 });
 
 test('selectedBearingProjectionGeoJSON: starts at anchor and projects along chosen compass bearing', () => {
